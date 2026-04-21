@@ -1,0 +1,33 @@
+[project]
+name = "project"
+version = "0.1.0"
+description = "Project for the AAIB course"
+authors = [{ name = "Anton S. Tsankov", email = "anton.tsankov@utwente.nl" }]
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "crewai[litellm,tools]==1.9.3",
+]
+
+[project.scripts]
+project = "project.main:run"
+greeting_crew = "project.main:run"
+train = "project.main:train"
+replay = "project.main:replay"
+test = "project.main:test"
+run_with_trigger = "project.main:run_with_trigger"
+
+[build-system]
+requires = ["hatchling"]
+where = ["src"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+required-environments = [
+  "sys_platform == 'darwin' and platform_machine == 'x86_64'"
+]
+override-dependencies = [
+  "onnxruntime>=0.0.0"
+]
+
+[tool.crewai]
+type = "crew"
