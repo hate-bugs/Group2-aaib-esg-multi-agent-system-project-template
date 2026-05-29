@@ -30,3 +30,11 @@ DOMAIN_KEYWORDS = {
 }
 
 ALL_DOMAINS = ("environmental", "social", "governance")
+
+
+DOMAIN_CHUNK_WEIGHTS = {
+    "environmental": 1.2,
+    "social": 1.1,
+    "governance": 1.15,
+    "general": 1.0,
+}

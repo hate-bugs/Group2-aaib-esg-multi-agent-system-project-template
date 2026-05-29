@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from statistics import mean
 
+MAX_SCORE = 20.0
+BASE_CONFIDENCE = 0.35
+MAX_CONFIDENCE = 0.95
+CONFIDENCE_COVERAGE_WEIGHT = 0.4
+MIN_TOKEN_NORMALIZER = 20
+
 from project.esg_framework.heuristics import DOMAIN_HEURISTICS, DOMAIN_KEYWORDS
 from project.esg_framework.models import Chunk, DomainScore
 
@@ -16,7 +22,7 @@ def score_label(score: float) -> str:
 
 def _normalize_score(raw_hits: int, token_count: int) -> float:
     density = raw_hits / max(token_count, 1)
-    calibrated = min(20.0, max(0.0, density * 160.0))
+    calibrated = min(MAX_SCORE, max(0.0, density * 160.0))
     return round(calibrated, 2)
 
 
@@ -30,7 +36,10 @@ def estimate_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore:
 
     score = _normalize_score(hits, token_total)
     coverage_hint = min(1.0, len(chunks) / 8)
-    confidence = round(min(0.95, 0.35 + (hits / max(20, token_total)) + 0.4 * coverage_hint), 3)
+    keyword_density_boost = hits / max(MIN_TOKEN_NORMALIZER, token_total)
+    coverage_boost = CONFIDENCE_COVERAGE_WEIGHT * coverage_hint
+    confidence_raw = BASE_CONFIDENCE + keyword_density_boost + coverage_boost
+    confidence = round(min(MAX_CONFIDENCE, confidence_raw), 3)
     rationale = (
         f"Used {len(chunks)} retrieved chunks ({token_total} tokens). "
         f"Detected {hits} domain-keyword hits based on heuristic: {DOMAIN_HEURISTICS[domain]}"

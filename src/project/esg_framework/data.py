@@ -6,12 +6,11 @@ from pathlib import Path
 
 from project.esg_framework.models import ReportRecord
 
+MAX_CSV_FIELD_SIZE = 10**9  # Supports unusually large preprocessed report text columns without csv field truncation.
+
 HEALTHCARE_KEYWORDS = (
     "health", "medical", "hospital", "pharma", "biotech", "care", "patient", "clinical", "therapeutic"
 )
-
-
-csv.field_size_limit(min(sys.maxsize, 10**9))
 
 
 def _to_float(value: str | None) -> float:
@@ -23,26 +22,32 @@ def _to_float(value: str | None) -> float:
 
 def load_reports(path: str | Path) -> list[ReportRecord]:
     records: list[ReportRecord] = []
-    with Path(path).open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        for idx, row in enumerate(reader):
-            report_id = row.get("") or str(idx)
-            records.append(
-                ReportRecord(
-                    report_id=str(report_id),
-                    filename=row.get("filename", ""),
-                    ticker=row.get("ticker", ""),
-                    year=row.get("year", ""),
-                    preprocessed_content=row.get("preprocessed_content", ""),
-                    sector=row.get("sector") or row.get("Sector"),
-                    ground_truth={
-                        "environmental": _to_float(row.get("e_score")),
-                        "social": _to_float(row.get("s_score")),
-                        "governance": _to_float(row.get("g_score")),
-                        "total": _to_float(row.get("total_score")),
-                    },
+    previous_limit = csv.field_size_limit()
+    # Reports may contain very large preprocessed text fields; temporarily raise CSV field limit while loading.
+    csv.field_size_limit(min(sys.maxsize, MAX_CSV_FIELD_SIZE))
+    try:
+        with Path(path).open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for idx, row in enumerate(reader):
+                report_id = row.get("") or str(idx)
+                records.append(
+                    ReportRecord(
+                        report_id=str(report_id),
+                        filename=row.get("filename", ""),
+                        ticker=row.get("ticker", ""),
+                        year=row.get("year", ""),
+                        preprocessed_content=row.get("preprocessed_content", ""),
+                        sector=row.get("sector") or row.get("Sector"),
+                        ground_truth={
+                            "environmental": _to_float(row.get("e_score")),
+                            "social": _to_float(row.get("s_score")),
+                            "governance": _to_float(row.get("g_score")),
+                            "total": _to_float(row.get("total_score")),
+                        },
+                    )
                 )
-            )
+    finally:
+        csv.field_size_limit(previous_limit)
     return records
 
 

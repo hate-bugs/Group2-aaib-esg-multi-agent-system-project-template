@@ -14,6 +14,11 @@ from project.esg_framework.patterns import (
 )
 from project.esg_framework.retrieval import ChunkStore
 
+def _safe_path_fragment(value: str, max_len: int = 64) -> str:
+    clean = "".join(ch for ch in str(value) if ch.isalnum() or ch in ("-", "_"))
+    return (clean[:max_len] if clean else "unknown")
+
+
 PATTERN_FUNCTIONS = {
     "parallel_concurrent": run_parallel_pattern,
     "handoff_hierarchical": run_handoff_pattern,
@@ -76,7 +81,8 @@ def run_experiment(
             all_results[pattern_name].append(representative.metrics)
             detailed[pattern_name].append(_serialize_report_result(representative))
 
-            chunk_file = Path(chunk_store_dir) / f"report_{record.report_id}_{pattern_name}.json"
+            safe_id = _safe_path_fragment(record.report_id)
+            chunk_file = Path(chunk_store_dir) / f"report_{safe_id}_{pattern_name}.json"
             chunk_store.persist_json(record.report_id, chunk_file)
 
     summary = {pattern: aggregate_pattern_metrics(metrics) for pattern, metrics in all_results.items()}

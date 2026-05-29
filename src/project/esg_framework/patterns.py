@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from statistics import mean
 from typing import Callable
 
@@ -18,7 +18,7 @@ from project.esg_framework.metrics import (
 )
 from project.esg_framework.models import DomainScore, ReportRecord, ReportRunResult, RetrievalEvent
 from project.esg_framework.retrieval import ChunkStore, retrieve_for_domain
-from project.esg_framework.scoring import aggregate_confidence, aggregate_total_score, critique_and_adjust, estimate_domain_score
+from project.esg_framework.scoring import aggregate_confidence, aggregate_total_score, critique_and_adjust, estimate_domain_score, score_label
 
 
 DomainScorer = Callable[[str], DomainScore]
@@ -101,8 +101,10 @@ def run_parallel_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Repor
         return score
 
     with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {domain: pool.submit(_score, domain) for domain in ALL_DOMAINS}
-        domain_scores = {domain: fut.result() for domain, fut in futures.items()}
+        futures = {pool.submit(_score, domain): domain for domain in ALL_DOMAINS}
+        domain_scores = {}
+        for fut in as_completed(futures):
+            domain_scores[futures[fut]] = fut.result()
 
     total_score = aggregate_total_score(domain_scores)
     comparison = _compare_to_ground_truth(total_score, report)
@@ -144,7 +146,8 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
         worker_groups = [selected[i::2] for i in range(2)]
 
         with ThreadPoolExecutor(max_workers=2) as pool:
-            worker_outputs = [pool.submit(estimate_domain_score, domain, group).result() for group in worker_groups if group]
+            futures = [pool.submit(estimate_domain_score, domain, group) for group in worker_groups if group]
+            worker_outputs = [future.result() for future in as_completed(futures)]
 
         if worker_outputs:
             merged_score = round(mean(item.estimated_score for item in worker_outputs), 2)
@@ -160,7 +163,7 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
             estimated_score=merged_score,
             confidence=merged_conf,
             rationale=f"Hierarchical worker aggregation. {merged_rationale}",
-            label="low" if merged_score < 8 else "medium" if merged_score < 16 else "high",
+            label=score_label(merged_score),
             retrieved_chunk_ids=[chunk.chunk_id for chunk in selected],
             used_chunk_ids=[chunk.chunk_id for group in worker_groups for chunk in group],
         )
@@ -202,6 +205,7 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
 
 
 def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, max_rounds: int = 3) -> ReportRunResult:
+    # max_rounds controls the maximum critique-adjust iterations per ESG domain scorer.
     timer = Timer()
     timer.start("parse_report")
     chunks = split_report_to_chunks(report)
@@ -246,7 +250,7 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
         domain_scores[domain] = current
         timer.stop(f"score_{domain}")
 
-    dominance_ratio = max(dominance_counter.values()) / max(1, len(dominance_counter))
+    dominance_ratio = (max(dominance_counter.values()) / len(dominance_counter)) if dominance_counter else 0.0
     deliberation = deliberation_quality(conflicts, len(ALL_DOMAINS), resolved, dominance_ratio)
 
     total_score = aggregate_total_score(domain_scores)

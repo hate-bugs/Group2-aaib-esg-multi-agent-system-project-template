@@ -7,6 +7,12 @@ from typing import Any
 
 from project.esg_framework.models import DomainScore, RetrievalEvent
 
+# Markers expected in rationale templates for lightweight grounding checks.
+# Limitation: this is a format-dependent heuristic, not semantic fact verification.
+# Claims without these markers are treated as likely unsupported in local hallucination estimates.
+SUPPORTED_MARKERS = ("Detected", "Used")
+PARTIAL_MARKER = "heuristic"
+
 
 class Timer:
     def __init__(self) -> None:
@@ -126,11 +132,19 @@ def inter_agent_agreement(results: dict[str, DomainScore]) -> dict[str, float]:
     label_matrix = [labels]
     kappa = fleiss_kappa(label_matrix, ["low", "medium", "high"])
 
-    values = [score.estimated_score for score in results.values()]
+    # Local proxy: compare each agent over shared continuous dimensions.
+    vectors = [
+        [
+            score.estimated_score,
+            score.confidence,
+            float(len(score.used_chunk_ids)),
+        ]
+        for score in results.values()
+    ]
     pairwise = []
-    for i in range(len(values) - 1):
-        for j in range(i + 1, len(values)):
-            pairwise.append(_pearson([values[i], values[j]], [values[j], values[i]]))
+    for i in range(len(vectors) - 1):
+        for j in range(i + 1, len(vectors)):
+            pairwise.append(_pearson(vectors[i], vectors[j]))
 
     return {
         "fleiss_kappa": round(kappa, 4),
@@ -139,6 +153,7 @@ def inter_agent_agreement(results: dict[str, DomainScore]) -> dict[str, float]:
 
 
 def hallucination_rate(outputs: dict[str, DomainScore]) -> dict[str, float]:
+    # This local approximation depends on scorer rationale templates containing support markers.
     total_claims = 0
     unsupported = 0
     partial = 0
@@ -146,9 +161,9 @@ def hallucination_rate(outputs: dict[str, DomainScore]) -> dict[str, float]:
         claims = [chunk.strip() for chunk in score.rationale.split(".") if chunk.strip()]
         total_claims += len(claims)
         for claim in claims:
-            if "Detected" not in claim and "Used" not in claim:
+            if not any(marker in claim for marker in SUPPORTED_MARKERS):
                 unsupported += 1
-            elif "heuristic" in claim and "Detected" not in claim:
+            elif PARTIAL_MARKER in claim and "Detected" not in claim:
                 partial += 1
 
     denom = max(1, total_claims)
