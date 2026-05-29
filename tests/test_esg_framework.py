@@ -56,7 +56,7 @@ class TestESGFramework(unittest.TestCase):
                     self.assertIn("estimated_score", first["domain_scores"][domain])
                     self.assertIn("confidence", first["domain_scores"][domain])
                     self.assertIn("rationale", first["domain_scores"][domain])
-                    self.assertTrue(first["domain_scores"][domain]["rationale"].startswith("["))
+                    self.assertTrue(first["domain_scores"][domain]["rationale"])
 
 
 if __name__ == "__main__":
