@@ -1,0 +1,55 @@
+parse_report_task:
+  description: >
+    Chunk the report, label each chunk by ESG domain, and persist the indexed chunks for downstream retrieval.
+  expected_output: >
+    A persisted chunk index plus a structured summary of chunk counts and domain labels.
+  agent: report_parser
+
+environmental_scoring_task:
+  description: >
+    Produce environmental estimated_score, confidence, and rationale using only preprocessed_content and retrieved chunks.
+  expected_output: >
+    JSON-like output containing estimated_score, confidence, rationale, and referenced chunk IDs.
+  agent: environmental_analyst
+
+social_scoring_task:
+  description: >
+    Produce social estimated_score, confidence, and rationale using only preprocessed_content and retrieved chunks.
+  expected_output: >
+    JSON-like output containing estimated_score, confidence, rationale, and referenced chunk IDs.
+  agent: social_analyst
+
+governance_scoring_task:
+  description: >
+    Produce governance estimated_score, confidence, and rationale using only preprocessed_content and retrieved chunks.
+  expected_output: >
+    JSON-like output containing estimated_score, confidence, rationale, and referenced chunk IDs.
+  agent: governance_analyst
+
+aggregate_scores_task:
+  description: >
+    Combine environmental, social, and governance outputs into one total ESG score using the configured weights.
+  expected_output: >
+    A transparent weighted ESG total with a brief explanation of the aggregation.
+  agent: score_aggregator
+
+compare_scores_task:
+  description: >
+    Compare estimated scores with available reference scores and report error direction and magnitude.
+  expected_output: >
+    A performance comparison summary including absolute error and percentage error when ground truth exists.
+  agent: performance_comparator
+
+evaluate_metrics_task:
+  description: >
+    Compute coverage, accuracy, consistency, inter-agent agreement, latency, hallucination, and deliberation metrics for the run.
+  expected_output: >
+    A metrics summary that can be aggregated across orchestration patterns.
+  agent: metrics_evaluator
+
+critique_task:
+  description: >
+    Review a scorer's rationale, identify unsupported or biased claims, and recommend bounded revisions until trust criteria are met.
+  expected_output: >
+    A critique decision containing approval status, rationale, and any recommended score adjustments.
+  agent: critique_agent
