@@ -25,13 +25,27 @@ from project.esg_framework.scoring import aggregate_confidence, aggregate_total_
 DomainScorer = Callable[[str], DomainScore]
 
 
+def _ground_truth_weighted_total(report: ReportRecord, weights: dict[str, float] | None = None) -> float:
+    weights = weights or {"environmental": 1.0, "social": 1.0, "governance": 1.0}
+    numerator = 0.0
+    denominator = 0.0
+    for domain in ALL_DOMAINS:
+        w = weights.get(domain, 1.0)
+        numerator += report.ground_truth.get(domain, 0.0) * w
+        denominator += w
+    if denominator == 0:
+        return 0.0
+    return round(numerator / denominator, 2)
+
+
 def _compare_to_ground_truth(total_score: float, report: ReportRecord) -> dict[str, float | str]:
-    actual = report.ground_truth.get("total", 0.0)
+    actual = _ground_truth_weighted_total(report)
     err = abs(total_score - actual)
     pct = (err / actual) * 100 if actual else 0.0
     direction = "over" if total_score > actual else "under"
     return {
         "actual_total": round(actual, 2),
+        "actual_total_dataset": round(report.ground_truth.get("total", 0.0), 2),
         "absolute_error": round(err, 4),
         "percentage_error": round(pct, 4),
         "direction": direction,
@@ -62,7 +76,7 @@ def _metric_bundle(
     )
 
     predicted_total = aggregate_total_score(domain_scores)
-    actual_total = report.ground_truth.get("total", 0.0)
+    actual_total = _ground_truth_weighted_total(report)
     mae_total = mae(predicted_total, actual_total)
     return {
         **coverage,

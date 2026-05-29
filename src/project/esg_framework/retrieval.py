@@ -6,6 +6,18 @@ from pathlib import Path
 from project.esg_framework.heuristics import DOMAIN_KEYWORDS
 from project.esg_framework.models import Chunk
 
+BOILERPLATE_TERMS = {
+    "style guide",
+    "pantone",
+    "logo",
+    "copyright",
+    "table of content",
+    "photo",
+    "image",
+    "contact us",
+    "this page intentionally",
+}
+
 
 class ChunkStore:
     def __init__(self) -> None:
@@ -42,15 +54,20 @@ def retrieve_for_domain(
 ) -> list[Chunk]:
     keywords = DOMAIN_KEYWORDS.get(domain, set())
 
-    scored: list[tuple[int, float, Chunk]] = []
+    scored: list[tuple[float, float, Chunk]] = []
     for chunk in chunks:
         text = chunk.text.lower()
+        # Score both total hits and keyword diversity to avoid over-valuing repeated single-term mentions.
         keyword_hits = sum(text.count(token) for token in keywords)
-        domain_bonus = 2 if domain in chunk.tags else 0
-        scored.append((keyword_hits + domain_bonus, chunk.weight, chunk))
+        diversity_hits = sum(1 for token in keywords if token in text)
+        domain_bonus = 2.0 if domain in chunk.tags else 0.0
+        boilerplate_penalty = sum(1 for token in BOILERPLATE_TERMS if token in text)
+        score = keyword_hits + (0.8 * diversity_hits) + domain_bonus - (1.5 * boilerplate_penalty)
+        scored.append((score, chunk.weight, chunk))
 
     scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    selected = [item[2] for item in scored if item[0] > 0][:max_chunks]
+    selected = [item[2] for item in scored if item[0] > 0.5][:max_chunks]
     if not selected:
-        selected = chunks[:max_chunks]
+        # Fallback keeps deterministic order while still preferring larger, more informative chunks.
+        selected = sorted(chunks, key=lambda c: c.token_count, reverse=True)[:max_chunks]
     return selected

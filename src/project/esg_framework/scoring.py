@@ -11,7 +11,7 @@ CONFIDENCE_COVERAGE_WEIGHT = 0.4
 MIN_TOKEN_NORMALIZER = 20
 MAX_LLM_CHUNK_CHARS = 2500
 
-from project.esg_framework.heuristics import DOMAIN_HEURISTICS, DOMAIN_KEYWORDS
+from project.esg_framework.heuristics import DOMAIN_HEURISTICS, DOMAIN_KEYWORDS, DOMAIN_SCORE_PRIORS
 from project.esg_framework.models import Chunk, DomainScore
 
 
@@ -84,9 +84,60 @@ def _build_domain_prompt(domain: str, chunks: list[Chunk]) -> str:
         "You are an ESG scoring assistant.\n"
         f"Domain: {domain}\n"
         "Estimate a score from 0 to 20 using ONLY the evidence chunks.\n"
+        "Be conservative: assign high scores only when the evidence explicitly shows structured policy, governance ownership, measurable targets, and outcomes.\n"
+        "If evidence is broad but shallow, keep the score moderate. If evidence is sparse, keep it low.\n"
         "Return strict JSON with keys: estimated_score (number), confidence (number 0..1), rationale (string).\n"
         "Do not include markdown.\n\n"
         f"Evidence:\n{evidence_block}"
+    )
+
+
+def _evidence_strength(domain: str, chunks: list[Chunk]) -> float:
+    if not chunks:
+        return 0.0
+    keywords = DOMAIN_KEYWORDS[domain]
+    token_total = sum(chunk.token_count for chunk in chunks)
+    text = " ".join(chunk.text.lower() for chunk in chunks)
+    hits = sum(text.count(token) for token in keywords)
+    diversity = sum(1 for token in keywords if token in text)
+    density = hits / max(token_total, 1)
+    diversity_ratio = diversity / max(len(keywords), 1)
+    coverage_ratio = min(1.0, len(chunks) / 10)
+    strength = (0.45 * min(1.0, density * 45.0)) + (0.35 * diversity_ratio) + (0.2 * coverage_ratio)
+    return max(0.0, min(1.0, strength))
+
+
+def _calibrate_domain_score(
+    domain: str,
+    base_score: DomainScore,
+    heuristic_score: DomainScore,
+    chunks: list[Chunk],
+) -> DomainScore:
+    prior = DOMAIN_SCORE_PRIORS.get(domain, 8.0)
+    strength = _evidence_strength(domain, chunks)
+
+    anchor = (0.65 * heuristic_score.estimated_score) + (0.35 * prior)
+    confidence_factor = max(0.0, min(1.0, base_score.confidence))
+    blend_alpha = min(0.9, 0.35 + (0.4 * strength) + (0.25 * confidence_factor))
+    calibrated = (blend_alpha * base_score.estimated_score) + ((1.0 - blend_alpha) * anchor)
+    calibrated_score = round(max(0.0, min(MAX_SCORE, calibrated)), 2)
+
+    calibrated_confidence = min(
+        MAX_CONFIDENCE,
+        0.2 + (0.55 * confidence_factor) + (0.25 * strength),
+    )
+
+    rationale = (
+        f"Used {len(chunks)} retrieved chunks. Detected evidence strength {strength:.2f}. "
+        f"Calibrated domain score using model output and healthcare prior ({prior:.2f}). "
+        f"Base rationale: {base_score.rationale}"
+    )
+
+    return DomainScore(
+        estimated_score=calibrated_score,
+        confidence=round(calibrated_confidence, 3),
+        rationale=rationale,
+        label=score_label(calibrated_score),
     )
 
 
@@ -134,14 +185,20 @@ def _llm_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore | None:
 
 
 def estimate_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore:
+    heuristic = _heuristic_domain_score(domain, chunks)
     llm_score = _llm_domain_score(domain, chunks)
     if llm_score is not None:
         llm_score.rationale = f"[llm] {llm_score.rationale}"
-        return llm_score
+        calibrated = _calibrate_domain_score(domain, llm_score, heuristic, chunks)
+        calibrated.retrieved_chunk_ids = llm_score.retrieved_chunk_ids
+        calibrated.used_chunk_ids = llm_score.used_chunk_ids
+        return calibrated
 
-    heuristic = _heuristic_domain_score(domain, chunks)
     heuristic.rationale = f"[heuristic_fallback] {heuristic.rationale}"
-    return heuristic
+    calibrated = _calibrate_domain_score(domain, heuristic, heuristic, chunks)
+    calibrated.retrieved_chunk_ids = heuristic.retrieved_chunk_ids
+    calibrated.used_chunk_ids = heuristic.used_chunk_ids
+    return calibrated
 
 
 def aggregate_total_score(domain_scores: dict[str, DomainScore], weights: dict[str, float] | None = None) -> float:

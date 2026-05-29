@@ -56,18 +56,27 @@ def run_experiment(
     output_path: str | Path | None = None,
     chunk_store_dir: str | Path = "/tmp/esg_chunk_store",
 ) -> dict[str, Any]:
+    print(f"[VERBOSE] Loading reports from: {dataset_path}")
     records = load_reports(dataset_path)
+    print(f"[VERBOSE] Loaded {len(records)} total records")
     healthcare = filter_healthcare_reports(records)
+    print(f"[VERBOSE] Filtered to {len(healthcare)} healthcare reports")
     sample = select_sample(healthcare, sample_size)
+    print(f"[VERBOSE] Selected {len(sample)} reports for sampling")
+    print(f"[VERBOSE] Patterns to run: {list(PATTERN_FUNCTIONS.keys())}")
+    print(f"[VERBOSE] Trials per pattern: {max(1, trials)}")
 
     chunk_store = ChunkStore()
     all_results: dict[str, list[dict[str, Any]]] = {pattern: [] for pattern in PATTERN_FUNCTIONS}
     detailed: dict[str, list[dict[str, Any]]] = {pattern: [] for pattern in PATTERN_FUNCTIONS}
 
-    for record in sample:
+    for i, record in enumerate(sample):
+        print(f"[VERBOSE] Processing report {i+1}/{len(sample)}: {record.report_id}")
         for pattern_name, fn in PATTERN_FUNCTIONS.items():
+            print(f"[VERBOSE]  Running pattern: {pattern_name}")
             trials_results: list[ReportRunResult] = []
-            for _ in range(max(1, trials)):
+            for trial in range(max(1, trials)):
+                print(f"[VERBOSE]    Trial {trial+1}/{max(1, trials)}")
                 result = fn(record, chunk_store)
                 trials_results.append(result)
 
@@ -80,11 +89,14 @@ def run_experiment(
 
             all_results[pattern_name].append(representative.metrics)
             detailed[pattern_name].append(_serialize_report_result(representative))
+            print(f"[VERBOSE]    Pattern {pattern_name} completed for report {record.report_id}")
 
             safe_id = _safe_path_fragment(record.report_id)
             chunk_file = Path(chunk_store_dir) / f"report_{safe_id}_{pattern_name}.json"
             chunk_store.persist_json(record.report_id, chunk_file)
+            print(f"[VERBOSE]    Chunk store saved to: {chunk_file}")
 
+    print(f"[VERBOSE] Aggregating metrics for all patterns...")
     summary = {pattern: aggregate_pattern_metrics(metrics) for pattern, metrics in all_results.items()}
 
     comparison_table = [
@@ -94,6 +106,11 @@ def run_experiment(
         }
         for pattern, stats in summary.items()
     ]
+
+    print(f"[VERBOSE] Experiment complete! Summary:")
+    for pattern, stats in summary.items():
+        print(f"[VERBOSE]  {pattern}: {stats}")
+    print(f"[VERBOSE] Saving results to: {output_path}")
 
     payload = {
         "dataset": str(dataset_path),
