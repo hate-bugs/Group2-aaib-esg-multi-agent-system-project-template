@@ -4,6 +4,7 @@ import csv
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 from project.esg.config import ESGExperimentConfig
 from project.esg.data import load_reports
@@ -62,6 +63,29 @@ class ESGFrameworkTests(unittest.TestCase):
             self.assertTrue(result_path.exists())
             self.assertTrue((tmp_path / "sample.json").exists())
             self.assertEqual(len(output["results"]), 6)
+
+    def test_load_reports_extracts_text_from_report_link_pdf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dataset_path = Path(tmp_dir) / "reports.csv"
+            with dataset_path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["ISIN", "Company", "Report Link"])
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "ISIN": "FR0000031577",
+                        "Company": "Virbac SA",
+                        "Report Link": "https://example.com/report.pdf",
+                    }
+                )
+
+            extractor = Mock(return_value="climate governance social oversight")
+            reports = load_reports(dataset_path, sample_size=1, pdf_extractor=extractor)
+
+            self.assertEqual(len(reports), 1)
+            self.assertEqual(reports[0].report_id, "FR0000031577")
+            self.assertEqual(reports[0].company_name, "Virbac SA")
+            self.assertIn("climate governance social oversight", reports[0].preprocessed_content)
+            extractor.assert_called_once_with("https://example.com/report.pdf")
 
 
 if __name__ == "__main__":

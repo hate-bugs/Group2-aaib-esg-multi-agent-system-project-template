@@ -35,6 +35,7 @@ class ESGExperimentConfig:
 
     def with_root(self, root: Path) -> "ESGExperimentConfig":
         dataset_candidates = [
+            root / "knowledge" / "sustainability-reports-2026-05-29.csv",
             root / "sustainability-reports-2026-05-29.csv",
             root / "data" / "sustainability-reports-2026-05-29.csv",
         ]

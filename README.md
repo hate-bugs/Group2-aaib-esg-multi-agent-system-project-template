@@ -66,14 +66,20 @@ If these are not set, the repository still runs the deterministic experiment fra
 Default dataset path:
 
 ```text
-/tmp/workspace/hate-bugs/Group2-aaib-esg-multi-agent-system-project-template/sustainability-reports-2026-05-29.csv
+/tmp/workspace/hate-bugs/Group2-aaib-esg-multi-agent-system-project-template/knowledge/sustainability-reports-2026-05-29.csv
 ```
 
-You can replace this CSV with the provided healthcare report export as long as it includes a `preprocessed_content` column. Supported field aliases include:
+The loader supports either:
+
+- preprocessed report text (`preprocessed_content` and aliases), or
+- report PDF URLs (`Report Link` and aliases), which are downloaded and parsed for RAG chunking.
+
+Supported field aliases include:
 
 - `report_id`, `id`, `company_id`, `isin`
 - `company_name`, `company`, `issuer_name`, `name`
 - `preprocessed_content`, `processed_content`, `content`, `report_text`, `text`
+- `report_link`, `Report Link`, `report url`, `pdf_url`, `url`
 - `environmental_score`, `social_score`, `governance_score`, `esg_score`
 
 ## How to run
