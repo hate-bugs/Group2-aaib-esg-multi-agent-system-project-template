@@ -1,0 +1,16 @@
+[
+  {
+    "chunk_id": "hc-010-chunk-1",
+    "report_id": "hc-010",
+    "text": "Juniper Life Sciences describes environmental strategy integration, reduction targets, taxonomy aligned investment, supplier engagement, board oversight, and climate risk identification and monitoring, while some liquidity and funding impacts remain less explicit. Social content covers workforce development, community investment, customer wellbeing, supplier codes, and reporting lines. Governance disclosures are extensive: the highest governance body oversees non-financial reporting, ethics, transparency, inclusiveness, conflict of interest management, internal communication, and governance performance in risk management arrangements.",
+    "token_count": 72,
+    "labels": [
+      "governance"
+    ],
+    "label_scores": {
+      "environmental": 0.3269,
+      "social": 0.3019,
+      "governance": 0.5484
+    }
+  }
+]

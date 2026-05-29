@@ -1,0 +1,18 @@
+[
+  {
+    "chunk_id": "hc-005-chunk-1",
+    "report_id": "hc-005",
+    "text": "Evergreen MedTech embeds environmental factors in strategy and financial planning, with transition plan targets, EU taxonomy aligned investment, climate stress testing, data quality controls, supplier engagement, risk limits, escalation triggers, and capital and liquidity impact reporting. Social sections mention employee development, community partnerships, and human rights reviews, but fewer detailed limits or transmission channels are disclosed. Governance sections discuss board oversight, ethics, transparency, non-financial reporting, and internal controls with regular audit committee updates.",
+    "token_count": 73,
+    "labels": [
+      "environmental",
+      "social",
+      "governance"
+    ],
+    "label_scores": {
+      "environmental": 0.5,
+      "social": 0.3585,
+      "governance": 0.4194
+    }
+  }
+]

@@ -1,201 +1,244 @@
-# Multi-Agent Collaboration Project
+# ESG Multi-Agent Evaluation Framework
 
-A multi-agent AI system built with CrewAI. Multiple specialised agents work together to analyse Financial Sustainability Reports.
+This repository now includes a modular ESG evaluation framework built around CrewAI-style agents, tasks, tools, and flows for comparing multi-agent orchestration patterns on healthcare sustainability reports.
 
----
+## What it does
 
-## What This Project Does
+The framework evaluates the first `N` reports from `sustainability-reports-2026-05-29.csv` and compares three orchestration patterns for ESG score prediction:
 
-Single LLMs struggle when asked to do many different things at once. This project solves that by splitting work across multiple agents, each scoped to one task. The agents communicate through shared memory and a Flow that coordinates execution order.
+1. **Parallel + concurrent**
+2. **Handoff / hierarchical**
+3. **Review and critique**
 
-**Use case:** Financial Sustainability Reports — documents that contain financial data, ESG metrics, and qualitative statements that must be read and interpreted together.
+Each report is parsed into chunks, labeled for ESG relevance, retrieved in a RAG-style evidence pass, scored for E/S/G, aggregated into a total score, and evaluated with shared metrics.
 
----
+## Project structure
 
-## Project Structure
-
+```text
+src/project/
+├── crews/
+│   ├── esg_evaluation_crew/
+│   │   ├── config/agents.yaml
+│   │   ├── config/tasks.yaml
+│   │   └── crew.py
+│   └── greeting_crew/
+├── esg/
+│   ├── config.py
+│   ├── data.py
+│   ├── chunking.py
+│   ├── retrieval.py
+│   ├── heuristics.py
+│   ├── metrics.py
+│   ├── scoring.py
+│   └── runner.py
+├── flows/
+│   └── esg_flows.py
+├── outputs/sample/first10_metrics_summary.json
+├── tools/
+│   ├── custom_tool.py
+│   └── esg_tools.py
+├── llm_config.py
+└── main.py
 ```
-agent_collaboration_project/
-├── .env                        ← your credentials and model config (never commit this)
-├── .gitignore
-├── pyproject.toml              ← project metadata and dependencies
-├── README.md
-└── src/
-    └── project/
-        ├── __init__.py
-        ├── main.py             ← entry point, runs crews or the full Flow
-        ├── llm_config.py       ← LLM setup, reads from .env
-        ├── tools/              ← custom tools agents can use
-        │   ├── __init__.py
-        │   └── custom_tool.py
-        ├── flows/              ← flow examples and templates
-        │   ├── __init__.py
-        │   ├── structured-flow.example.py      ← Flow with typed Pydantic state
-        │   └── unstructured-flow.example.py    ← Flow with plain dict state
-        └── crews/              ← one folder per crew
-            └── greeting_crew/
-                ├── __init__.py
-                ├── greeting_crew.py
-                └── config/
-                    ├── agents.yaml     ← agent role, goal, backstory
-                    └── tasks.yaml      ← task descriptions and expected outputs
-```
 
-### Key concepts
+## Setup
 
-| Concept / Abstraction | Single Sentence Explanation|
-|---|---|
-| **Agent** | An LLM with a role, a goal, and optional tools |
-| **Task** | A specific instruction given to an agent |
-| **Crew** | A group of agents + tasks that run together |
-| **Flow** | Orchestrates multiple crews, manages shared state |
-| **Tool** | A Python function an agent can call (e.g. read a PDF, make a calculation) |
-
-### Structured vs Unstructured Flows
-
-In CrewAI, **Flows** allow you to coordinate multiple tasks and agents. Choosing between a Structured or Unstructured state determines how data is passed and validated between these steps.
-
-| Type | State | Use when |
-|---|---|---|
-| Structured | Pydantic `BaseModel` | You know the fields upfront. Type-safe. Recommended. |
-| Unstructured | Plain `dict` | You need dynamic or unknown fields at runtime. |
-
-See `flows/structured-flow.example.py` and `flows/unstructured-flow.example.py` for templates.
-
----
-
-## Environment Variables
-
-Create a `.env` file at the project root:
+### 1. Install dependencies
 
 ```bash
-LLM_MODEL_NAME=your-model-name
+uv sync
+```
+
+### 2. Optional environment variables for live LLM-backed CrewAI use
+
+Create `.env` in the repository root if you want live LLM-backed CrewAI agents:
+
+```bash
+LLM_MODEL_NAME=your-model
+LLM_BASE_URL=https://your-endpoint
 LLM_API_KEY=your-key
-LLM_BASE_URL=your-model-url
 ```
 
-These are read by `llm_config.py` file at startup.
-`llm_config.py` is the file where you can configure your LLM settings.
-It is one central file, as that makes it easy to configure all settings for your LLM accross all agents and crews.
- <b><u>Never commit `.env`</u></b>
+If these are not set, the repository still runs the deterministic experiment framework and tests without crashing.
 
----
+## Dataset
 
-## UV — Package Manager
+Default dataset path:
 
-`uv` manages dependencies and virtual environments.
-
-### Install
-
-**Mac / Linux using curl:**
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+```text
+/tmp/workspace/hate-bugs/Group2-aaib-esg-multi-agent-system-project-template/sustainability-reports-2026-05-29.csv
 ```
 
-**Mac / Linux using wget:**
-```bash
-wget -qO- https://astral.sh/uv/install.sh | sh
-```
+You can replace this CSV with the provided healthcare report export as long as it includes a `preprocessed_content` column. Supported field aliases include:
 
-**Windows (PowerShell):**
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
+- `report_id`, `id`, `company_id`, `isin`
+- `company_name`, `company`, `issuer_name`, `name`
+- `preprocessed_content`, `processed_content`, `content`, `report_text`, `text`
+- `environmental_score`, `social_score`, `governance_score`, `esg_score`
 
-After running your install command you should in top shape to use `uv`. Howerver that may not always be the case, so to be on the safe side, make sure to restart your terminal after installing.
+## How to run
 
-### UV commands that you will use most often
-
-The following table contains a list of the most commonly used commands that you can expect to use throughout your project.
-
-| Command | What it does |
-|---|---|
-| `uv sync` | Install all dependencies from `pyproject.toml`. Creates the `.venv`  folder for you |
-| `uv add <package>` | Add a new dependency and install it |
-| `uv run <file.py>` | Run a Python file inside the project environment |
-| `uv run <script>` | Run a named script from `pyproject.toml` |
-
-In case there are dependency issues, or you need to get funcky with them, a rule of thumb is to recreate the `.venv` folder
-
-#### What is the `.venv` folder?
-<u>The .venv folder is a private, isolated sandbox that stores all the specific tools and libraries your project needs to run.</u> By keeping these files inside your project folder rather than mixing them with your computer’s main system, `uv` ensures that one project's requirements never interfere with another's. <u>Think of it as a custom "tool kit" where the Python version and every package you install are neatly tucked away, ensuring your code works exactly the same every time you run it.</u>
-
-One of the best things about `uv` is that it manages this folder with incredible speed and efficiency. Instead of wasting disk space by downloading the same library multiple times for different projects, uv uses a central cache to link files into the `.venv` folder instantly. You can delete the folder at any time to "reset" your environment and recreate it in seconds using `uv sync`. <u>Just remember to keep it out of your Git repository.</u>
-
----
-
-## Running the Project
-
-To run the project itself and the scripts defined in your project, you use the following command. This ensures the script runs within your isolated `.venv` environment with all the correct dependencies automatically loaded:
+### Run all three patterns on the first 10 reports
 
 ```bash
-uv run <project-script>
+uv run esg_experiments --sample-size 10
 ```
 
-To run a specific function from `main.py` directly:
+### Run a single pattern
 
 ```bash
-# Mac / Linux
-uv run src/project/main.py
-
-# Windows
-uv run src\project\main.py
+uv run esg_experiments --pattern parallel
+uv run esg_experiments --pattern hierarchical
+uv run esg_experiments --pattern review
 ```
 
-To add your own scripts, you simply list them in your `pyproject.toml` file under a `[project.scripts]` section. You map the command name you want to use to the specific function in your Python code, see example `pyproject.toml` file below:
+### Use a different dataset path
 
-```toml
-[project]
-.....
-
-[project.scripts]
-project = "project.main:run"
-greeting_crew = "project.main:run"
-train = "project.main:train"
-replay = "project.main:replay"
-test = "project.main:test"
-run_with_trigger = "project.main:run_with_trigger"
-
-[build-system]
-......
-
-[tool.uv]
-.....
-
-[tool.crewai]
-....
-
+```bash
+uv run esg_experiments --dataset-path /absolute/path/to/sustainability-reports-2026-05-29.csv
 ```
 
----
+### Change hyperparameters
 
-## Adding a New Crew
-To expand your project with a new specialized crew, follow these steps to ensure it integrates correctly with the CrewAI framework and your `uv` environment:
+```bash
+uv run esg_experiments \
+  --sample-size 10 \
+  --chunk-size 220 \
+  --chunk-overlap 40 \
+  --top-k 5 \
+  --trials 4 \
+  --critique-max-iterations 4
+```
 
-1.  **Create the Directory Structure** Create a new folder at `src/project/crews/<my_new_crew>/`. Keeping each crew in its own directory ensures that configurations and custom logic remain modular and easy to debug.
+## Outputs
 
-2.  **Initialize Required Files** Inside your new folder, add the following boilerplate files:
-    * `__init__.py`: Marks the directory as a Python package.
-    * `my_crew.py`: This is the engine room where you define your class and logic.
-    * `config/agents.yaml`: A clean YAML file to define agent roles, goals, and backstories.
-    * `config/tasks.yaml`: A YAML file to define the specific assignments and expected outputs for your agents.
+Generated artifacts:
 
-3.  **Implement the `@CrewBase` Pattern** Open `my_crew.py` and mirror the structure of an existing crew. Use the `@CrewBase` decorator to let CrewAI handle the automatic loading of your YAML configurations. This pattern connects your Python methods (decorated with `@agent` and `@task`) directly to the settings defined in your YAML files.
+- `outputs/indexes/<report_id>.json` — persisted report chunks with ESG labels
+- `outputs/experiments/first10_metrics_summary.json` — latest experiment output
+- `src/project/outputs/sample/first10_metrics_summary.json` — committed sample output artifact
 
+## Orchestration patterns
 
-4.  **Register and Invoke in `main.py`** To make your crew executable, import the class into your entry point (`src/project/main.py`). Wrap it in a function—for example, `run_my_new_crew()`—that instantiates the crew and calls `.kickoff()`.
+### 1. Parallel + concurrent
 
----
+Pipeline:
 
-### Adding a New Flow
+```text
+loader -> parser -> E/S/G scorers in parallel -> aggregator -> comparator -> metrics
+```
 
-A **Flow** is the "brain" that connects your different crews. While a crew handles specific tasks, the Flow decides the order in which those crews run and how they share information.
+### 2. Handoff / hierarchical
 
-* **1. Start with a Template**
-    Copy `flows/structured-flow.example.py` or `flows/unstructured-flow.example.py`. These files contain the boilerplate code needed to make the Flow talk to CrewAI.
-* **2. Name Your Logic**
-    Rename the class and the "State" model. The State is just a shared container (like a backpack) that holds the data as it moves from the first crew to the last.
-* **3. Map the Sequence**
-    Use `@start()` to pick the first action and `@listen()` to tell the next action to wait for the one before it. This "wires" your crews together in a specific chain.
-* **4. Activate in Main**
-    Go to `main.py`, import your new Flow, and create a function that calls `.kickoff()`. This is the "start button" that puts the entire sequence into motion.
+Pipeline:
+
+```text
+loader -> parser -> domain scorers -> worker chunk splits -> domain aggregation -> aggregator -> comparator -> metrics
+```
+
+### 3. Review and critique
+
+Pipeline:
+
+```text
+loader -> parser -> scorer <-> critique loop -> aggregator -> comparator -> metrics
+```
+
+The critique loop is bounded by `critique_max_iterations`.
+
+## Agent definitions
+
+CrewAI-style agents are defined in `src/project/crews/esg_evaluation_crew/config/agents.yaml` and include:
+
+- Report Parser
+- Environmental Analyst
+- Social Analyst
+- Governance Analyst
+- Score Aggregator
+- Performance Comparator
+- Metrics Evaluator
+- Critique Agent
+
+Each agent definition includes:
+
+- `role`
+- `goal`
+- `backstory`
+- `tools`
+- `allow_delegation`
+- `verbose`
+
+## Scoring contract
+
+Every ESG domain scorer returns:
+
+- `estimated_score`
+- `confidence`
+- `rationale`
+
+The rationale is grounded in retrieved chunk IDs and only uses `preprocessed_content`.
+
+## Retrieval and indexing
+
+- Reports are chunked by configurable token-like word windows.
+- Each chunk is labeled for environmental, social, and/or governance relevance.
+- Chunk indexes are persisted as JSON artifacts for local retrieval.
+- Retrieval uses lexical/domain heuristic overlap to approximate RAG behavior.
+
+## Metrics implemented
+
+The framework reports operational versions of the requested metrics:
+
+1. **Coverage**
+   - weighted binary coverage
+   - partial token coverage
+2. **Accuracy**
+   - with GT: macro precision/recall/F1 and MAE
+   - without GT: judge score average approximation
+3. **Consistency**
+   - repeated-trial similarity across trials
+4. **Inter-Agent Agreement**
+   - Fleiss' kappa over score bands
+   - pairwise Pearson-style continuous agreement approximation
+5. **Latency and Efficiency**
+   - wall-clock latency
+   - critical path latency
+   - coverage-per-call
+   - coverage-per-token
+6. **Hallucination Rate**
+   - unsupported claim rate
+   - partially supported claim rate
+7. **Agent Deliberation Quality**
+   - conflict detection / resolution quality / dominance ratio composite
+
+## Metric assumptions
+
+Some requested formulas require LLM judging or external ground truth not guaranteed to exist in every CSV. This implementation makes pragmatic, inspectable approximations:
+
+- chunk retrieval coverage is based on retrieved chunk IDs and token counts
+- judge score uses grounded vs unsupported heuristic claims in the generated rationale
+- consistency compares repeated-trial score distance plus rationale token overlap
+- agreement maps continuous scores into `low`, `medium`, `high` bands for kappa
+- deliberation quality uses critique and worker review traces as the deliberation record
+- the report `preprocessed_content` is treated as the grounding source of truth for support checks
+
+## Validation
+
+Run focused tests with:
+
+```bash
+uv run python -m unittest discover -s tests
+```
+
+Run a compile sanity check with:
+
+```bash
+uv run python -m compileall src
+```
+
+## Known limitations
+
+- The deterministic experiment engine is designed to be reproducible and testable without requiring external LLM credentials.
+- CrewAI agents/tasks/flows are defined in-repo, but the committed sample artifact is generated from the deterministic execution path for offline validation.
+- Retrieval uses lightweight lexical heuristics rather than an embedding database.
+- If your real CSV uses different column names, pass the expected aliases or update the loader candidates in `src/project/esg/data.py`.

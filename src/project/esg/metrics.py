@@ -17,8 +17,8 @@ def score_to_label(score: float) -> str:
 
 
 def compute_coverage(total_tokens: int, retrieved_tokens: int, total_chunks: int, retrieved_chunks: int) -> dict[str, float]:
-    weighted_binary = retrieved_chunks / max(1, total_chunks)
-    partial = retrieved_tokens / max(1, total_tokens)
+    weighted_binary = min(1.0, retrieved_chunks / max(1, total_chunks))
+    partial = min(1.0, retrieved_tokens / max(1, total_tokens))
     return {
         "weighted_binary": round(weighted_binary, 4),
         "partial": round(partial, 4),

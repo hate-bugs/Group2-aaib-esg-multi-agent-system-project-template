@@ -15,6 +15,7 @@ train = "project.main:train"
 replay = "project.main:replay"
 test = "project.main:test"
 run_with_trigger = "project.main:run_with_trigger"
+esg_experiments = "project.main:run_esg_experiments"
 
 [build-system]
 requires = ["hatchling"]

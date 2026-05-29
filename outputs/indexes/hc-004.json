@@ -1,0 +1,18 @@
+[
+  {
+    "chunk_id": "hc-004-chunk-1",
+    "report_id": "hc-004",
+    "text": "Delta Clinics lists a few environmental reduction targets and a management committee but provides limited evidence about capital impact, market risk transmission, or supplier engagement. The report includes employee training, customer care commitments, community programs, and a grievance channel but minimal quantified social limits or standards. Governance coverage includes ethics policies, conflict of interest declarations, internal communication, and board review of non-financial reporting.",
+    "token_count": 63,
+    "labels": [
+      "environmental",
+      "social",
+      "governance"
+    ],
+    "label_scores": {
+      "environmental": 0.2692,
+      "social": 0.3208,
+      "governance": 0.4194
+    }
+  }
+]

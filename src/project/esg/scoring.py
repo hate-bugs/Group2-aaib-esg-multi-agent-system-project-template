@@ -81,6 +81,14 @@ def _compare(total_score: float, actual_scores: dict[str, float | None]) -> dict
         "direction": direction,
     }
 
+def _unique_retrieval_stats(retrieval_groups) -> tuple[list[str], int]:
+    unique_chunks = {}
+    for items in retrieval_groups:
+        for item in items:
+            unique_chunks[item.chunk.chunk_id] = item.chunk
+    return list(unique_chunks), sum(chunk.token_count for chunk in unique_chunks.values())
+
+
 
 def _metrics_for_result(
     report: ReportRecord,
@@ -151,8 +159,7 @@ def run_parallel_pattern(report: ReportRecord, config: ESGExperimentConfig, tria
         domain_scores = {domain: future.result() for domain, future in futures.items()}
     total_score = _aggregate(domain_scores, config.score_weights)
     wall_clock = time.perf_counter() - started
-    retrieved_chunks = [item.chunk.chunk_id for items in retrievals.values() for item in items]
-    retrieved_token_count = sum(item.chunk.token_count for items in retrievals.values() for item in items)
+    retrieved_chunks, retrieved_token_count = _unique_retrieval_stats(retrievals.values())
     trace = PatternTrace(
         retrieved_chunk_ids=retrieved_chunks,
         retrieved_token_count=retrieved_token_count,
@@ -182,8 +189,7 @@ def run_hierarchical_pattern(report: ReportRecord, config: ESGExperimentConfig, 
     retriever = ChunkRetriever(chunks)
     deliberations: list[DeliberationRecord] = []
     domain_scores: dict[str, DomainScore] = {}
-    retrieved_chunks: list[str] = []
-    retrieved_token_count = 0
+    retrieved_chunks: dict[str, int] = {}
     total_agent_calls = 0
 
     for domain in DOMAINS:
@@ -219,14 +225,14 @@ def run_hierarchical_pattern(report: ReportRecord, config: ESGExperimentConfig, 
         else:
             domain_scores[domain] = _build_domain_score(domain, [])
         total_agent_calls += domain_scores[domain].calls_used
-        retrieved_chunks.extend(item.chunk.chunk_id for item in items)
-        retrieved_token_count += sum(item.chunk.token_count for item in items)
+        for item in items:
+            retrieved_chunks[item.chunk.chunk_id] = item.chunk.token_count
 
     total_score = _aggregate(domain_scores, config.score_weights)
     wall_clock = time.perf_counter() - started
     trace = PatternTrace(
-        retrieved_chunk_ids=retrieved_chunks,
-        retrieved_token_count=retrieved_token_count,
+        retrieved_chunk_ids=list(retrieved_chunks),
+        retrieved_token_count=sum(retrieved_chunks.values()),
         total_token_count=sum(chunk.token_count for chunk in chunks),
         agent_calls=total_agent_calls,
         critical_path_latency=wall_clock * 0.75,
@@ -254,8 +260,7 @@ def run_review_pattern(report: ReportRecord, config: ESGExperimentConfig, trial:
     retriever = ChunkRetriever(chunks)
     domain_scores: dict[str, DomainScore] = {}
     deliberations: list[DeliberationRecord] = []
-    retrieved_chunks: list[str] = []
-    retrieved_token_count = 0
+    retrieved_chunks: dict[str, int] = {}
     total_agent_calls = 0
     pre_total_candidates: list[float] = []
 
@@ -297,16 +302,16 @@ def run_review_pattern(report: ReportRecord, config: ESGExperimentConfig, trial:
             if approved:
                 break
         domain_scores[domain] = current
-        retrieved_chunks.extend(item.chunk.chunk_id for item in items)
-        retrieved_token_count += sum(item.chunk.token_count for item in items)
+        for item in items:
+            retrieved_chunks[item.chunk.chunk_id] = item.chunk.token_count
         total_agent_calls += current.calls_used
 
     pre_total = mean(pre_total_candidates)
     total_score = _aggregate(domain_scores, config.score_weights)
     wall_clock = time.perf_counter() - started
     trace = PatternTrace(
-        retrieved_chunk_ids=retrieved_chunks,
-        retrieved_token_count=retrieved_token_count,
+        retrieved_chunk_ids=list(retrieved_chunks),
+        retrieved_token_count=sum(retrieved_chunks.values()),
         total_token_count=sum(chunk.token_count for chunk in chunks),
         agent_calls=total_agent_calls,
         critical_path_latency=wall_clock * 0.9,

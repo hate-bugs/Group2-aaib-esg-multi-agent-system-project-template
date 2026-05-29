@@ -1,0 +1,18 @@
+[
+  {
+    "chunk_id": "hc-002-chunk-1",
+    "report_id": "hc-002",
+    "text": "Beacon Care references environmental targets and reduction objectives but has limited discussion of taxonomy aligned investment and only partial detail on climate risk methodology or escalation triggers. Its social strategy is strong with employee wellbeing, community engagement, customer safety, human rights monitoring, supplier code checks, and remuneration alignment to social objectives. Governance reporting includes sustainability committee review of non-financial reporting, ethics training, transparency updates, conflict management, whistleblowing, and risk management oversight.",
+    "token_count": 71,
+    "labels": [
+      "environmental",
+      "social",
+      "governance"
+    ],
+    "label_scores": {
+      "environmental": 0.3462,
+      "social": 0.3962,
+      "governance": 0.4516
+    }
+  }
+]

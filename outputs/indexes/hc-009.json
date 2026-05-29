@@ -1,0 +1,17 @@
+[
+  {
+    "chunk_id": "hc-009-chunk-1",
+    "report_id": "hc-009",
+    "text": "Ionis Care Group includes environmental objectives, a board committee, and climate monitoring, but it is lighter on market risk and capital impact analysis. Its social disclosures are stronger with employee wellbeing, customer safety, community investment, human rights governance, supplier expectations, risk methodologies, and escalation triggers. Governance content discusses ethics, inclusiveness, transparency, conflict of interest management, internal communication, and sustainability reporting oversight.",
+    "token_count": 61,
+    "labels": [
+      "social",
+      "governance"
+    ],
+    "label_scores": {
+      "environmental": 0.2308,
+      "social": 0.3019,
+      "governance": 0.4839
+    }
+  }
+]

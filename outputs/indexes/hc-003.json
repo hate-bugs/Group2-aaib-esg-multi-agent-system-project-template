@@ -1,0 +1,17 @@
+[
+  {
+    "chunk_id": "hc-003-chunk-1",
+    "report_id": "hc-003",
+    "text": "Crescent Pharma notes environmental objectives and some board oversight, but mitigation tools, liquidity impacts, taxonomy aligned activity, and counterparty engagement are brief. Social disclosures mention employee safety, customer trust, and periodic human rights reviews, while limits, escalation triggers, and transmission to major risk types remain modest. Governance sections are more detailed with board oversight, compliance, internal communication, transparency, conflict of interest management, and integration of governance performance in risk management arrangements.",
+    "token_count": 71,
+    "labels": [
+      "social",
+      "governance"
+    ],
+    "label_scores": {
+      "environmental": 0.2692,
+      "social": 0.3396,
+      "governance": 0.4839
+    }
+  }
+]

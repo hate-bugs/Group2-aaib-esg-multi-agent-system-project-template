@@ -1,0 +1,18 @@
+[
+  {
+    "chunk_id": "hc-007-chunk-1",
+    "report_id": "hc-007",
+    "text": "GreenPulse Health links environmental strategy to financial planning, discloses reduction targets, supplier engagement, board reporting frequency, remuneration alignment, data quality controls, and climate risk monitoring. It also details employee wellbeing, community impact, patient safety targets, human rights governance, grievance tools, and risk escalation procedures. Governance arrangements cover ethics, transparency, conflict management, internal communication, and board responsibility for non-financial reporting and risk oversight.",
+    "token_count": 62,
+    "labels": [
+      "environmental",
+      "social",
+      "governance"
+    ],
+    "label_scores": {
+      "environmental": 0.3654,
+      "social": 0.4151,
+      "governance": 0.4839
+    }
+  }
+]

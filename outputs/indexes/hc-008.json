@@ -1,0 +1,18 @@
+[
+  {
+    "chunk_id": "hc-008-chunk-1",
+    "report_id": "hc-008",
+    "text": "Helix Hospitals reports environmental targets, management body responsibilities, and supplier engagement, but gives only partial detail on taxonomy aligned investment and risk transmission. Social topics include employee and customer commitments, community outreach, and some human rights reporting, with limited quantitative limits. Governance sections cover transparency and ethics but less detail on conflict management and integration into risk management arrangements.",
+    "token_count": 59,
+    "labels": [
+      "environmental",
+      "social",
+      "governance"
+    ],
+    "label_scores": {
+      "environmental": 0.2692,
+      "social": 0.3208,
+      "governance": 0.2581
+    }
+  }
+]

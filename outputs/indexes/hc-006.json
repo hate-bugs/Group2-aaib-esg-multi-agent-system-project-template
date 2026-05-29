@@ -1,0 +1,17 @@
+[
+  {
+    "chunk_id": "hc-006-chunk-1",
+    "report_id": "hc-006",
+    "text": "Frontier Biologics provides general sustainability statements with a few objectives for emissions and safety. The report mentions employee wellbeing, ethics, and board oversight of reporting, but it lacks detailed methodologies, risk limits, escalation triggers, taxonomy alignment, and comprehensive transmission channel analysis.",
+    "token_count": 41,
+    "labels": [
+      "social",
+      "governance"
+    ],
+    "label_scores": {
+      "environmental": 0.1346,
+      "social": 0.1698,
+      "governance": 0.2258
+    }
+  }
+]

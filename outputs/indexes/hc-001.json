@@ -1,0 +1,18 @@
+[
+  {
+    "chunk_id": "hc-001-chunk-1",
+    "report_id": "hc-001",
+    "text": "Aster Health integrates environmental strategy into financial planning and maintains a transition plan with net zero targets, carbon reduction objectives, risk limits, escalation triggers, and board reporting lines tied to remuneration. The company reports taxonomy aligned green investment, supplier engagement on environmental risk mitigation, climate stress testing, data quality controls, and transmission channel analysis across credit risk, liquidity, market risk, operational risk, and reputational risk. Social strategy covers employee wellbeing, patient safety targets, supplier code enforcement, grievance channels, community investment, human rights oversight, and reporting frequency to management. Governance disclosures describe board oversight of non-financial reporting, ethics, transparency, conflict of interest management, internal communication, audit committee review, and internal control monitoring.",
+    "token_count": 111,
+    "labels": [
+      "environmental",
+      "social",
+      "governance"
+    ],
+    "label_scores": {
+      "environmental": 0.6923,
+      "social": 0.5849,
+      "governance": 0.6129
+    }
+  }
+]
