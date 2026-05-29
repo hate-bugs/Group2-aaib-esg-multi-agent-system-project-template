@@ -1,0 +1,48 @@
+parse_report_task:
+  description: >
+    Parse one report into chunks, tag chunks by ESG domain, and persist retrievable chunk artifacts with tracing metadata.
+  expected_output: >
+    JSON-like structure with chunk ids, text spans, tags, and persistence location.
+  agent: report_parser
+
+environmental_scoring_task:
+  description: >
+    Produce environmental estimated_score, confidence (0-1), and rationale using only retrieved report chunks and environmental heuristics.
+  expected_output: >
+    Structured output containing estimated_score, confidence, rationale.
+  agent: environmental_analyst
+
+social_scoring_task:
+  description: >
+    Produce social estimated_score, confidence (0-1), and rationale using only retrieved report chunks and social heuristics.
+  expected_output: >
+    Structured output containing estimated_score, confidence, rationale.
+  agent: social_analyst
+
+governance_scoring_task:
+  description: >
+    Produce governance estimated_score, confidence (0-1), and rationale using only retrieved report chunks and governance heuristics.
+  expected_output: >
+    Structured output containing estimated_score, confidence, rationale.
+  agent: governance_analyst
+
+aggregate_scores_task:
+  description: >
+    Aggregate E/S/G domain scores into total score and verify weighted consistency.
+  expected_output: >
+    Weighted total score and consistency checks.
+  agent: score_aggregator
+
+compare_performance_task:
+  description: >
+    Compare estimated score outputs with actual labels to compute absolute and percentage errors.
+  expected_output: >
+    Error report with absolute error, percentage error, and over/under direction.
+  agent: performance_comparator
+
+evaluate_metrics_task:
+  description: >
+    Evaluate coverage, accuracy, consistency, inter-agent agreement, latency/efficiency, hallucination, and deliberation quality.
+  expected_output: >
+    Metrics summary suitable for cross-pattern comparison.
+  agent: metrics_evaluator
