@@ -43,6 +43,12 @@ class TestESGFramework(unittest.TestCase):
 
             data = json.loads(output_file.read_text(encoding="utf-8"))
             for pattern in payload["patterns"]:
+                self.assertIn(pattern, data["summary"])
+                self.assertIn("accuracy", data["summary"][pattern])
+                self.assertIn("predicted_total_avg", data["summary"][pattern])
+                self.assertIn("actual_total_avg", data["summary"][pattern])
+
+            for pattern in payload["patterns"]:
                 self.assertIn(pattern, data["results"])
                 self.assertGreater(len(data["results"][pattern]), 0)
                 first = data["results"][pattern][0]
@@ -50,6 +56,7 @@ class TestESGFramework(unittest.TestCase):
                     self.assertIn("estimated_score", first["domain_scores"][domain])
                     self.assertIn("confidence", first["domain_scores"][domain])
                     self.assertIn("rationale", first["domain_scores"][domain])
+                    self.assertTrue(first["domain_scores"][domain]["rationale"].startswith("["))
 
 
 if __name__ == "__main__":

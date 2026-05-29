@@ -250,7 +250,8 @@ PYTHONPATH=src python -m project.esg_experiments --sample-size 10 --trials 3 --o
 Outputs include per-pattern summary and comparative metrics for:
 
 - Coverage (weighted + partial)
-- Accuracy (MAE + local judge-mode proxy abstraction)
+- Accuracy (MAE + normalized accuracy + local judge-mode proxy abstraction)
+- Predicted and actual total score averages
 - Consistency (qualitative + quantitative)
 - Inter-agent agreement (Fleiss' Kappa + pairwise Pearson)
 - Latency and efficiency

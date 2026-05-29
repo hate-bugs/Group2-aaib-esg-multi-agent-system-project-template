@@ -12,6 +12,7 @@ from project.esg_framework.models import DomainScore, RetrievalEvent
 # Claims without these markers are treated as likely unsupported in local hallucination estimates.
 SUPPORTED_MARKERS = ("Detected", "Used")
 PARTIAL_MARKER = "heuristic"
+TOTAL_SCORE_MAX = 20.0
 
 
 class Timer:
@@ -59,6 +60,13 @@ def coverage_metrics(
 
 def mae(prediction: float, truth: float) -> float:
     return round(abs(prediction - truth), 4)
+
+
+def accuracy_from_mae(mae_value: float, max_score: float = TOTAL_SCORE_MAX) -> float:
+    if max_score <= 0:
+        return 0.0
+    normalized_error = min(1.0, max(0.0, mae_value / max_score))
+    return round(1.0 - normalized_error, 4)
 
 
 def judge_accuracy_stub(scores: dict[str, DomainScore]) -> float:
@@ -216,6 +224,9 @@ def aggregate_pattern_metrics(results: list[dict[str, Any]]) -> dict[str, Any]:
         "coverage_weighted",
         "coverage_partial",
         "mae_total",
+        "accuracy",
+        "predicted_total_avg",
+        "actual_total_avg",
         "judge_accuracy",
         "consistency_quantitative",
         "latency_total",

@@ -8,6 +8,7 @@ from project.esg_framework.chunking import split_report_to_chunks
 from project.esg_framework.heuristics import ALL_DOMAINS
 from project.esg_framework.metrics import (
     Timer,
+    accuracy_from_mae,
     coverage_metrics,
     deliberation_quality,
     hallucination_rate,
@@ -60,9 +61,15 @@ def _metric_bundle(
         total_tokens=sum(chunk_tokens.values()),
     )
 
+    predicted_total = aggregate_total_score(domain_scores)
+    actual_total = report.ground_truth.get("total", 0.0)
+    mae_total = mae(predicted_total, actual_total)
     return {
         **coverage,
-        "mae_total": mae(aggregate_total_score(domain_scores), report.ground_truth.get("total", 0.0)),
+        "mae_total": mae_total,
+        "accuracy": accuracy_from_mae(mae_total),
+        "predicted_total_avg": round(predicted_total, 4),
+        "actual_total_avg": round(actual_total, 4),
         "judge_accuracy": judge_accuracy_stub(domain_scores),
         "agreement_fleiss_kappa": agreement["fleiss_kappa"],
         "agreement_pairwise_pearson": agreement["pairwise_pearson"],
