@@ -4,3 +4,6 @@
 **/*.pyo
 .DS_Store
 .venv/
+.idea
+output
+.ai

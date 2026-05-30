@@ -54,8 +54,20 @@ def run_experiment(
     sample_size: int = 10,
     trials: int = 3,
     output_path: str | Path | None = None,
-    chunk_store_dir: str | Path = "/tmp/esg_chunk_store",
+    chunk_store_dir: str | Path = "output/tmp/esg_chunk_store",
 ) -> dict[str, Any]:
+    # If a system /tmp path is passed in (or came from an environment default),
+    # coerce it to the repository-local `output/tmp` folder so persisted chunk
+    # stores live under the project root.
+    def _is_system_tmp(p: str | Path) -> bool:
+        if not p:
+            return False
+        s = str(p)
+        return s == "/tmp" or s == "/private/tmp" or s.startswith("/tmp/") or s.startswith("/private/tmp/")
+
+    if _is_system_tmp(chunk_store_dir):
+        repo_root = Path(__file__).resolve().parents[3]
+        chunk_store_dir = str(repo_root / "output" / "tmp" / Path(chunk_store_dir).name)
     print(f"[VERBOSE] Loading reports from: {dataset_path}")
     records = load_reports(dataset_path)
     print(f"[VERBOSE] Loaded {len(records)} total records")
