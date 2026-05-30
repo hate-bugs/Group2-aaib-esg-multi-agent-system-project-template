@@ -17,6 +17,14 @@ DOMAIN_HEURISTICS = {
     ),
 }
 
+SCORING_RUBRIC = {
+    "0-4": "Very weak or absent disclosure. Mentions are generic, non-committal, or marketing-focused.",
+    "5-8": "Basic policy intent. Some governance/process description but limited measurable targets or monitoring outcomes.",
+    "9-12": "Moderate maturity. Clear ownership and risk/process integration with at least some quantified targets or implementation evidence.",
+    "13-16": "Strong maturity. Structured strategy, governance, and risk-management disclosures with concrete targets, limits, and progress indicators.",
+    "17-20": "Leading practice. Comprehensive and consistent evidence across all heuristic areas, including quantified outcomes and clear accountability.",
+}
+
 DOMAIN_KEYWORDS = {
     "environmental": {
         "environment", "emission", "carbon", "climate", "taxonomy", "energy", "waste", "pollution", "biodiversity", "water", "renewable",
@@ -29,6 +37,45 @@ DOMAIN_KEYWORDS = {
     "governance": {
         "governance", "board", "audit", "ethic", "compliance", "transparency", "remuneration", "oversight", "risk committee", "conflict",
         "policy", "internal control", "whistleblower", "anti-corruption", "independence", "committee", "accountability", "assurance"
+    },
+}
+
+DOMAIN_SIGNAL_KEYWORDS = {
+    "structured_policy": {
+        "policy",
+        "framework",
+        "oversight",
+        "governance",
+        "committee",
+        "responsibility",
+    },
+    "quantified_targets": {
+        "target",
+        "kpi",
+        "threshold",
+        "limit",
+        "baseline",
+        "2025",
+        "2030",
+        "%",
+    },
+    "monitoring_results": {
+        "progress",
+        "result",
+        "achieved",
+        "reduced",
+        "improved",
+        "measured",
+        "trend",
+    },
+    "risk_methods": {
+        "risk management",
+        "methodology",
+        "scenario",
+        "stress test",
+        "escalation",
+        "data quality",
+        "controls",
     },
 }
 

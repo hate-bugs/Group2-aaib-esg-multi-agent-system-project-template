@@ -7,30 +7,40 @@ parse_report_task:
 
 environmental_scoring_task:
   description: >
-    Produce environmental estimated_score, confidence (0-1), and rationale using only retrieved report chunks and environmental heuristics.
+    Score environmental performance using only retrieved preprocessed_content chunks.
+    Explicitly evaluate strategy/processes, governance, and risk-management criteria from the environmental heuristics.
+    Explain which criteria are evidenced vs missing. Use conservative scoring bands: 0-4 weak/absent, 5-8 basic, 9-12 moderate, 13-16 strong, 17-20 leading.
+    Do not score above 12 unless evidence includes measurable targets and monitoring results.
   expected_output: >
-    Structured output containing estimated_score, confidence, rationale.
+    JSON object with keys: estimated_score, confidence, rationale, supported_criteria (list), missing_criteria (list).
   agent: environmental_analyst
 
 social_scoring_task:
   description: >
-    Produce social estimated_score, confidence (0-1), and rationale using only retrieved report chunks and social heuristics.
+    Score social performance using only retrieved preprocessed_content chunks.
+    Explicitly evaluate strategy/processes, governance, and risk-management criteria from the social heuristics.
+    Explain which criteria are evidenced vs missing. Use conservative scoring bands: 0-4 weak/absent, 5-8 basic, 9-12 moderate, 13-16 strong, 17-20 leading.
+    Do not score above 12 unless evidence includes measurable targets and monitoring results.
   expected_output: >
-    Structured output containing estimated_score, confidence, rationale.
+    JSON object with keys: estimated_score, confidence, rationale, supported_criteria (list), missing_criteria (list).
   agent: social_analyst
 
 governance_scoring_task:
   description: >
-    Produce governance estimated_score, confidence (0-1), and rationale using only retrieved report chunks and governance heuristics.
+    Score governance performance using only retrieved preprocessed_content chunks.
+    Explicitly evaluate governance-arrangement and governance-risk-management criteria from the governance heuristics.
+    Explain which criteria are evidenced vs missing. Use conservative scoring bands: 0-4 weak/absent, 5-8 basic, 9-12 moderate, 13-16 strong, 17-20 leading.
+    Do not score above 12 unless evidence includes measurable targets and monitoring results.
   expected_output: >
-    Structured output containing estimated_score, confidence, rationale.
+    JSON object with keys: estimated_score, confidence, rationale, supported_criteria (list), missing_criteria (list).
   agent: governance_analyst
 
 aggregate_scores_task:
   description: >
     Aggregate E/S/G domain scores into total score and verify weighted consistency.
+    If a domain score is high but rationale lacks explicit evidence coverage, flag calibration risk in notes.
   expected_output: >
-    Weighted total score and consistency checks.
+    JSON object with weighted_total_score, consistency_checks, and calibration_risks.
   agent: score_aggregator
 
 compare_performance_task:

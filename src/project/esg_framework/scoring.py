@@ -11,7 +11,13 @@ CONFIDENCE_COVERAGE_WEIGHT = 0.4
 MIN_TOKEN_NORMALIZER = 20
 MAX_LLM_CHUNK_CHARS = 2500
 
-from project.esg_framework.heuristics import DOMAIN_HEURISTICS, DOMAIN_KEYWORDS, DOMAIN_SCORE_PRIORS
+from project.esg_framework.heuristics import (
+    DOMAIN_HEURISTICS,
+    DOMAIN_KEYWORDS,
+    DOMAIN_SCORE_PRIORS,
+    DOMAIN_SIGNAL_KEYWORDS,
+    SCORING_RUBRIC,
+)
 from project.esg_framework.models import Chunk, DomainScore
 
 
@@ -25,7 +31,7 @@ def score_label(score: float) -> str:
 
 def _normalize_score(raw_hits: int, token_count: int) -> float:
     density = raw_hits / max(token_count, 1)
-    calibrated = min(MAX_SCORE, max(0.0, density * 160.0))
+    calibrated = min(MAX_SCORE, max(0.0, density * 120.0))
     return round(calibrated, 2)
 
 
@@ -64,7 +70,7 @@ def _extract_first_json_dict(raw_text: str) -> dict | None:
     except (TypeError, json.JSONDecodeError):
         pass
 
-    match = re.search(r"\{.*\}", raw_text, flags=re.DOTALL)
+    match = re.search(r"\{.*}", raw_text, flags=re.DOTALL)
     if not match:
         return None
     try:
@@ -80,12 +86,20 @@ def _build_domain_prompt(domain: str, chunks: list[Chunk]) -> str:
         evidence.append(f"[{chunk.chunk_id}] {text[:MAX_LLM_CHUNK_CHARS]}")
     evidence_block = "\n\n".join(evidence) if evidence else "[NO_EVIDENCE]"
 
+    rubric = "\n".join(f"- {band}: {desc}" for band, desc in SCORING_RUBRIC.items())
     return (
         "You are an ESG scoring assistant.\n"
         f"Domain: {domain}\n"
         "Estimate a score from 0 to 20 using ONLY the evidence chunks.\n"
-        "Be conservative: assign high scores only when the evidence explicitly shows structured policy, governance ownership, measurable targets, and outcomes.\n"
-        "If evidence is broad but shallow, keep the score moderate. If evidence is sparse, keep it low.\n"
+        "Use only preprocessed_content evidence. Do not assume facts that are not explicitly stated.\n"
+        f"Apply this domain heuristic checklist: {DOMAIN_HEURISTICS[domain]}\n"
+        "Use this scoring rubric exactly:\n"
+        f"{rubric}\n"
+        "Scoring discipline:\n"
+        "1) Start near a neutral prior and move up only with explicit evidence.\n"
+        "2) Keep score <= 8 if evidence is generic or lacks measurable targets/results.\n"
+        "3) Keep score <= 12 unless evidence shows clear governance ownership plus risk methods and monitoring outcomes.\n"
+        "4) Use > 16 only for exceptional, comprehensive, and quantified evidence across strategy, governance, and risk management.\n"
         "Return strict JSON with keys: estimated_score (number), confidence (number 0..1), rationale (string).\n"
         "Do not include markdown.\n\n"
         f"Evidence:\n{evidence_block}"
@@ -103,8 +117,28 @@ def _evidence_strength(domain: str, chunks: list[Chunk]) -> float:
     density = hits / max(token_total, 1)
     diversity_ratio = diversity / max(len(keywords), 1)
     coverage_ratio = min(1.0, len(chunks) / 10)
-    strength = (0.45 * min(1.0, density * 45.0)) + (0.35 * diversity_ratio) + (0.2 * coverage_ratio)
+    quality = _evidence_quality_score(chunks)
+    strength = (
+        (0.25 * min(1.0, density * 35.0))
+        + (0.25 * diversity_ratio)
+        + (0.1 * coverage_ratio)
+        + (0.4 * quality)
+    )
     return max(0.0, min(1.0, strength))
+
+
+def _evidence_quality_score(chunks: list[Chunk]) -> float:
+    if not chunks:
+        return 0.0
+    text = " ".join(chunk.text.lower() for chunk in chunks)
+    if not text.strip():
+        return 0.0
+
+    category_scores: list[float] = []
+    for keywords in DOMAIN_SIGNAL_KEYWORDS.values():
+        hits = sum(1 for keyword in keywords if keyword in text)
+        category_scores.append(hits / max(len(keywords), 1))
+    return max(0.0, min(1.0, mean(category_scores)))
 
 
 def _calibrate_domain_score(
@@ -115,21 +149,32 @@ def _calibrate_domain_score(
 ) -> DomainScore:
     prior = DOMAIN_SCORE_PRIORS.get(domain, 8.0)
     strength = _evidence_strength(domain, chunks)
+    quality = _evidence_quality_score(chunks)
 
-    anchor = (0.65 * heuristic_score.estimated_score) + (0.35 * prior)
+    anchor = (0.55 * heuristic_score.estimated_score) + (0.45 * prior)
     confidence_factor = max(0.0, min(1.0, base_score.confidence))
-    blend_alpha = min(0.9, 0.35 + (0.4 * strength) + (0.25 * confidence_factor))
-    calibrated = (blend_alpha * base_score.estimated_score) + ((1.0 - blend_alpha) * anchor)
+    llm_delta = base_score.estimated_score - anchor
+    blend_alpha = 0.15 + (0.5 * strength) + (0.15 * confidence_factor)
+    if llm_delta > 0 and quality < 0.35:
+        blend_alpha *= 0.55
+    blend_alpha = max(0.1, min(0.68, blend_alpha))
+    calibrated = anchor + (blend_alpha * llm_delta)
+
+    # Keep optimistic tails under control unless evidence quality is genuinely strong.
+    evidence_cap = min(MAX_SCORE, prior + 3.0 + (10.0 * quality))
+    if calibrated > evidence_cap:
+        calibrated = evidence_cap
+
     calibrated_score = round(max(0.0, min(MAX_SCORE, calibrated)), 2)
 
     calibrated_confidence = min(
         MAX_CONFIDENCE,
-        0.2 + (0.55 * confidence_factor) + (0.25 * strength),
+        0.2 + (0.45 * confidence_factor) + (0.2 * strength) + (0.1 * quality),
     )
 
     rationale = (
-        f"Used {len(chunks)} retrieved chunks. Detected evidence strength {strength:.2f}. "
-        f"Calibrated domain score using model output and healthcare prior ({prior:.2f}). "
+        f"Used {len(chunks)} retrieved chunks. Evidence strength={strength:.2f}, quality={quality:.2f}. "
+        f"Calibrated with heuristic anchor and healthcare prior ({prior:.2f}) using conservative rubric gating. "
         f"Base rationale: {base_score.rationale}"
     )
 

@@ -105,7 +105,7 @@ def run_parallel_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Repor
 
     def _score(domain: str) -> DomainScore:
         timer.start(f"score_{domain}")
-        selected = retrieve_for_domain(chunks, domain)
+        selected = retrieve_for_domain(chunks, domain, max_chunks=6)
         score = estimate_domain_score(domain, selected)
         score.retrieved_chunk_ids = [chunk.chunk_id for chunk in selected]
         score.used_chunk_ids = [chunk.chunk_id for chunk in selected]
@@ -163,7 +163,7 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
 
     for domain in ALL_DOMAINS:
         timer.start(f"score_{domain}")
-        selected = retrieve_for_domain(chunks, domain, max_chunks=10)
+        selected = retrieve_for_domain(chunks, domain, max_chunks=8)
         worker_groups = [selected[i::2] for i in range(2)]
 
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -241,7 +241,7 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
 
     for domain in ALL_DOMAINS:
         timer.start(f"score_{domain}")
-        selected = retrieve_for_domain(chunks, domain, max_chunks=8)
+        selected = retrieve_for_domain(chunks, domain, max_chunks=6)
         current = estimate_domain_score(domain, selected)
         current.retrieved_chunk_ids = [chunk.chunk_id for chunk in selected]
         current.used_chunk_ids = [chunk.chunk_id for chunk in selected]
@@ -249,7 +249,7 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
 
         while rounds < max_rounds:
             rounds += 1
-            critique_chunks = retrieve_for_domain(chunks, domain, max_chunks=5)
+            critique_chunks = retrieve_for_domain(chunks, domain, max_chunks=4)
             revised, stats = critique_and_adjust(domain, current, critique_chunks)
             if stats["adjusted"]:
                 conflicts += 1
