@@ -5,6 +5,7 @@ import warnings
 from datetime import datetime
 
 from project.crews.greeting_crew.crew import GreetingCrew
+from project.esg_experiments import main as run_esg_cli
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
@@ -92,3 +93,13 @@ def run_with_trigger():
         return result
     except Exception as e:
         raise Exception(f"An error occurred while running the crew with trigger: {e}")
+
+
+def run_esg_experiments():
+    """
+    Run ESG orchestration experiments on preprocessed sustainability reports.
+    """
+    try:
+        run_esg_cli(sys.argv[1:])
+    except Exception as e:
+        raise Exception(f"An error occurred while running ESG experiments: {e}")

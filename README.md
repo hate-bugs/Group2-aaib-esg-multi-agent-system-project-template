@@ -199,3 +199,69 @@ A **Flow** is the "brain" that connects your different crews. While a crew handl
     Use `@start()` to pick the first action and `@listen()` to tell the next action to wait for the one before it. This "wires" your crews together in a specific chain.
 * **4. Activate in Main**
     Go to `main.py`, import your new Flow, and create a function that calls `.kickoff()`. This is the "start button" that puts the entire sequence into motion.
+---
+
+## ESG Multi-Agent Evaluation Framework
+
+This repository now includes a modular CrewAI-based ESG evaluation framework focused on sustainability report analysis with RAG-style chunk retrieval and tracing.
+
+### Included orchestration patterns
+
+1. **Parallel + concurrent (baseline)**
+2. **Handoff / hierarchical** (domain scorers aggregate delegated worker subsets)
+3. **Review and critique** (domain scorer + critique loop)
+
+Each flow processes **one report per run**:
+
+- `ParallelConcurrentESGFlow`
+- `HandoffHierarchicalESGFlow`
+- `ReviewCritiqueESGFlow`
+
+Implementation modules live under `src/project/esg_framework/` and `src/project/flows/esg_flows.py`.
+
+### Agent + task definitions
+
+A CrewBase-style crew matching the repository convention is included in:
+
+- `src/project/crews/esg_evaluation_crew/crew.py`
+- `src/project/crews/esg_evaluation_crew/config/agents.yaml`
+- `src/project/crews/esg_evaluation_crew/config/tasks.yaml`
+
+Agent definitions include role, goal, backstory, tools, allow_delegation, and verbose fields.
+
+### Data scope
+
+- Dataset: `knowledge/sustainability-reports-preprocessed.csv`
+- Focus: healthcare companies (sector when available, keyword fallback otherwise)
+- Sample mode: first `N` healthcare reports (default 10)
+
+### Run local comparison (first 10 reports)
+
+```bash
+uv run esg_experiments --sample-size 10 --trials 3 --output /tmp/esg_experiment_results.json
+```
+
+Without `uv`, run directly:
+
+```bash
+PYTHONPATH=src python -m project.esg_experiments --sample-size 10 --trials 3 --output /tmp/esg_experiment_results.json
+```
+
+Outputs include per-pattern summary and comparative metrics for:
+
+- Coverage (weighted + partial)
+- Accuracy (MAE + normalized accuracy + local judge-mode proxy abstraction)
+- Predicted and actual total score averages
+- Consistency (qualitative + quantitative)
+- Inter-agent agreement (Fleiss' Kappa + pairwise Pearson)
+- Latency and efficiency
+- Hallucination rates
+- Deliberation quality
+
+Retrieval traces and chunk stores are serialized (default `/tmp/esg_chunk_store`) to support coverage analysis and reproducibility.
+
+### Tests
+
+```bash
+PYTHONPATH=src python -m unittest discover -s tests -v
+```
