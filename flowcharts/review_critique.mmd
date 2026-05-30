@@ -1,0 +1,38 @@
+```mermaid
+flowchart TD
+  %% Review & Critique ESG Flow (conceptual)
+  Start([Start]) --> LoadData["Load preprocessed report/dataset"]
+  LoadData --> Segment["Segment report into chunks for retrieval"]
+  Segment --> Store["Store chunks in index (ChunkStore) and record parse timing"]
+
+  subgraph DomainLoop [Iterative critique-and-adjust loop per domain]
+    direction TB
+    BeginDomain["Begin evaluation for a single domain (environmental/social/governance)"] --> RetrieveInitial["Retrieve initial evidence (top relevant chunks)"]
+    RetrieveInitial --> InitialEstimate["Analyst produces initial estimate: score, confidence, rationale"]
+    InitialEstimate --> IterationStart["Set up rounds counter and prepare for critique rounds"]
+
+    IterationStart --> CritiqueDecision{ "Should we attempt critique rounds? (rounds < max)" }
+    CritiqueDecision -- Yes --> RetrieveCritique["Retrieve targeted critique evidence (challenging or contradictory chunks)"]
+    RetrieveCritique --> CritiqueStep["Reviewers critique current judgment and propose revisions"]
+    CritiqueStep --> WasAdjusted{ "Was the judgment adjusted?" }
+    WasAdjusted -- Yes --> Update["Accept revision: update current score; increment conflicts/resolved; continue rounds"]
+    WasAdjusted -- No --> EndRounds["No change — stop iterative critique"]
+    Update --> CritiqueDecision
+    CritiqueDecision -- No --> EndRounds
+
+    EndRounds --> Finalize["Finalize domain score after critique rounds; record used chunks and trace"]
+    Finalize --> StoreDomain["Save domain score & proceed to next domain"]
+  end
+
+  DomainLoop --> Deliberation["Compute deliberation summary (conflicts, resolved, dominance ratio)"]
+  Deliberation --> Aggregate["Aggregate domain scores into final total and compute confidence"]
+  Aggregate --> Evaluate["Compute metrics: coverage, hallucination, agreement, latency, MAE/accuracy, deliberation metrics"]
+  Evaluate --> Compare["Compare predicted total to ground truth; prepare comparison stats"]
+  Compare --> Result["Produce final run result (pattern=review_critique) with domain scores, traces, metrics, metadata"]
+  Result --> End([End])
+
+  %% Key differences: iterative critique rounds allow reviewers to revise judgments, increasing deliberation and potentially improving accuracy at cost of more agent calls and latency
+  classDef note fill:#e8f7ff,stroke:#333,stroke-width:1px;
+  Note["Key: iterative critique & adjustment → more deliberation, conflict tracking, potential accuracy gains"]:::note
+  DomainLoop --> Note
+```

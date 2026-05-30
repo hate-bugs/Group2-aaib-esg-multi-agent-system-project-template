@@ -1,0 +1,28 @@
+```mermaid
+flowchart TD
+  %% Parallel Concurrent ESG Flow (conceptual)
+  Start([Start]) --> LoadData["Load preprocessed reports / dataset"]
+  LoadData --> Segment["Segment report into content chunks (semantic chunking)"]
+  Segment --> Store["Index/store chunks for retrieval (ChunkStore)"]
+  Store --> Prepare["Prepare timing/logging (parse timing recorded)"]
+
+  subgraph ParallelScoring [Independent domain analysts run concurrently]
+    direction TB
+    A1["Environmental analyst: retrieve most relevant chunks; form independent judgment; produce score + rationale"]
+    A2["Social analyst: retrieve most relevant chunks; form independent judgment; produce score + rationale"]
+    A3["Governance analyst: retrieve most relevant chunks; form independent judgment; produce score + rationale"]
+  end
+
+  Prepare --> ParallelScoring
+  ParallelScoring --> Collect["Collect independent domain scores and retrieval traces"]
+  Collect --> Aggregate["Combine domain scores into a total score & aggregate confidence"]
+  Aggregate --> Evaluate["Compute evaluation metrics: coverage, hallucination, inter-agent agreement, latency, MAE/accuracy, deliberation summary"]
+  Evaluate --> Compare["Compare predicted total to ground truth (error, direction, pct)"]
+  Compare --> Result["Produce final run result (pattern=parallel_concurrent) with domain scores, traces, metrics"]
+  Result --> End([End])
+
+  %% Key differences: agents act in parallel, independent judgments, lower latency, limited deliberation
+  classDef note fill:#f9f,stroke:#333,stroke-width:1px;
+  Notes["Key: parallel & independent; fewer agent calls; faster runtime; less cross-agent deliberation"]:::note
+  ParallelScoring --> Notes
+```

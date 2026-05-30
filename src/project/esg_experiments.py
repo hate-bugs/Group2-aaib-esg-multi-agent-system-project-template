@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from project.esg_framework.runner import run_experiment
@@ -9,21 +10,33 @@ from project.esg_framework.runner import run_experiment
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run ESG multi-agent orchestration comparison experiments")
+    # Environment-overridable defaults (each can be set via an environment variable):
+    # ESG_DATASET_PATH: path to the preprocessed CSV of reports
+    default_dataset = os.getenv("ESG_DATASET_PATH", "knowledge/sustainability-reports-preprocessed.csv")
+    # ESG_SAMPLE_SIZE: number of reports to sample for experiments
+    default_sample_size = int(os.getenv("ESG_SAMPLE_SIZE", "10"))
+    # ESG_TRIALS: number of trials per pattern/report to run
+    default_trials = int(os.getenv("ESG_TRIALS", "3"))
+    # ESG_OUTPUT_PATH: where to write the experiment results JSON
+    default_output = os.getenv("ESG_OUTPUT_PATH", "output/esg_experiment_results.json")
+    # ESG_CHUNK_STORE_DIR: directory to store serialized chunk stores used for retrieval tracing
+    default_chunk_store = os.getenv("ESG_CHUNK_STORE_DIR", "output/tmp/esg_chunk_store")
+
     parser.add_argument(
         "--dataset",
-        default="knowledge/sustainability-reports-preprocessed.csv",
+        default=default_dataset,
         help="Path to preprocessed report CSV",
     )
-    parser.add_argument("--sample-size", type=int, default=10, help="Healthcare report sample size")
-    parser.add_argument("--trials", type=int, default=3, help="Trials per report/pattern for consistency")
+    parser.add_argument("--sample-size", type=int, default=default_sample_size, help="Healthcare report sample size")
+    parser.add_argument("--trials", type=int, default=default_trials, help="Trials per report/pattern for consistency")
     parser.add_argument(
         "--output",
-        default="output/esg_experiment_results.json",
+        default=default_output,
         help="Output JSON path for detailed results",
     )
     parser.add_argument(
         "--chunk-store-dir",
-        default="output/tmp/esg_chunk_store",
+        default=default_chunk_store,
         help="Directory for serialized chunk stores used for retrieval tracing",
     )
     return parser

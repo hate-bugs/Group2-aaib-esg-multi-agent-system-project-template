@@ -1,0 +1,33 @@
+flowchart TD
+  %% Handoff Hierarchical ESG Flow (conceptual)
+  Start([Start]) --> LoadData["Load preprocessed report/dataset"]
+  LoadData --> Segment["Segment report into content chunks for retrieval"]
+  Segment --> Store["Store chunks in retrieval/index store (ChunkStore)"]
+  Store --> Prepare["Log/Timer: parse timing recorded"]
+
+  subgraph DomainLoop [Process each ESG domain sequentially]
+    direction TB
+    DomainStart["Select next domain to evaluate (environmental/social/governance)"] --> Retrieve["Retrieve a broader set of relevant chunks for that domain"]
+    Retrieve --> Partition["Partition retrieved chunks across hierarchical worker groups (split work among specialists)"]
+    Partition --> ParallelWorkers["Each worker group analyzes its subset in parallel and returns a partial judgment"]
+    ParallelWorkers --> MergeDecision["Are multiple worker outputs available?"]
+    MergeDecision -- Yes --> Merge["Merge worker judgments into a single domain score (e.g. average score, combined rationale)"]
+    MergeDecision -- No --> SingleAnalyst["Fallback: single analyst forms the domain judgment"]
+    Merge --> FinalizeDomain["Finalize DomainScore with merged score, confidence, rationale, and used chunks"]
+    SingleAnalyst --> FinalizeDomain
+    FinalizeDomain --> RecordTrace["Record retrieval & worker trace (who used which chunks)"]
+    RecordTrace --> NextDomain["Store domain score & proceed to next domain"]
+  end
+
+  DomainLoop --> Aggregate["Aggregate domain scores into total score & overall confidence"]
+  Aggregate --> Evaluate["Compute metrics: coverage, hallucination, agreement, latency, MAE/accuracy, deliberation"]
+  Evaluate --> Compare["Compare predicted total to ground truth"]
+  Compare --> Result["Produce final run result (pattern=handoff_hierarchical) with domain scores, traces, metrics"]
+  Result --> End([End])
+
+  %% Key differences: hierarchical handoff divides work across worker groups, then aggregates — more agent calls, increased deliberation and potential for richer rationales
+  classDef note fill:#fffae6,stroke:#333,stroke-width:1px;
+  Note["Key: hierarchical handoff → parallel sub-workers per domain; outputs merged into final domain judgment; higher compute & deliberation"]:::note
+  DomainLoop --> Note
+
+

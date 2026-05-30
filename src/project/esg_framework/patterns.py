@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from statistics import mean
 from typing import Callable
@@ -20,9 +21,45 @@ from project.esg_framework.metrics import (
 from project.esg_framework.models import DomainScore, ReportRecord, ReportRunResult, RetrievalEvent
 from project.esg_framework.retrieval import ChunkStore, retrieve_for_domain
 from project.esg_framework.scoring import aggregate_confidence, aggregate_total_score, critique_and_adjust, estimate_domain_score, score_label
+import logging
+
+# Configure a module-level logger. If the application already configures
+# logging this will be a no-op; otherwise we provide a sensible default so
+# logs are visible during development.
+logger = logging.getLogger(__name__)
+if not logging.getLogger().hasHandlers():
+    logging.basicConfig(level=logging.INFO)
 
 
 DomainScorer = Callable[[str], DomainScore]
+
+
+# Configuration constants driven by environment variables so behaviour can be tuned
+# without changing code. Each variable has a clear purpose documented below.
+# PATTERN_PARALLEL_MAX_WORKERS: threadpool size for the parallel/concurrent pattern
+PARALLEL_MAX_WORKERS = int(os.getenv("PATTERN_PARALLEL_MAX_WORKERS", "3"))
+# PATTERN_PARALLEL_MAX_CHUNKS: max chunks retrieved per domain in parallel pattern
+PARALLEL_MAX_CHUNKS = int(os.getenv("PATTERN_PARALLEL_MAX_CHUNKS", "6"))
+
+# PATTERN_HANDOFF_MAX_WORKERS: threadpool size for hierarchical handoff worker groups
+HANDOFF_MAX_WORKERS = int(os.getenv("PATTERN_HANDOFF_MAX_WORKERS", "2"))
+# PATTERN_HANDOFF_WORKER_GROUPS: number of worker groups to split work into (hierarchy)
+HANDOFF_WORKER_GROUPS = int(os.getenv("PATTERN_HANDOFF_WORKER_GROUPS", "2"))
+# PATTERN_HANDOFF_MAX_CHUNKS: max chunks retrieved per domain in handoff pattern
+HANDOFF_MAX_CHUNKS = int(os.getenv("PATTERN_HANDOFF_MAX_CHUNKS", "8"))
+
+# PATTERN_REVIEW_MAX_CHUNKS: initial max chunks retrieved per domain in review/critique
+REVIEW_MAX_CHUNKS = int(os.getenv("PATTERN_REVIEW_MAX_CHUNKS", "6"))
+# PATTERN_REVIEW_CRITIQUE_CHUNKS: chunks used specifically for critique adjustments
+REVIEW_CRITIQUE_CHUNKS = int(os.getenv("PATTERN_REVIEW_CRITIQUE_CHUNKS", "4"))
+# PATTERN_REVIEW_MAX_ROUNDS: maximum critique-adjust rounds per domain
+REVIEW_MAX_ROUNDS = int(os.getenv("PATTERN_REVIEW_MAX_ROUNDS", "3"))
+
+# Total agent call estimates used for latency/efficiency metrics. These are
+# approximate counts of model calls performed per pattern and can be tuned.
+PARALLEL_TOTAL_AGENT_CALLS = int(os.getenv("PATTERN_PARALLEL_TOTAL_AGENT_CALLS", "3"))
+HANDOFF_TOTAL_AGENT_CALLS = int(os.getenv("PATTERN_HANDOFF_TOTAL_AGENT_CALLS", "9"))
+REVIEW_TOTAL_AGENT_CALLS = int(os.getenv("PATTERN_REVIEW_TOTAL_AGENT_CALLS", "6"))
 
 
 def _ground_truth_weighted_total(report: ReportRecord, weights: dict[str, float] | None = None) -> float:
@@ -105,7 +142,11 @@ def run_parallel_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Repor
 
     def _score(domain: str) -> DomainScore:
         timer.start(f"score_{domain}")
-        selected = retrieve_for_domain(chunks, domain, max_chunks=6)
+        logger.info("%s: analyst starting scoring", f"{domain}_analyst")
+        # retrieve a bounded number of chunks relevant to the domain. The
+        # PARALLEL_MAX_CHUNKS constant controls the breadth of retrieval and
+        # therefore the amount of evidence available to the domain scorer.
+        selected = retrieve_for_domain(chunks, domain, max_chunks=PARALLEL_MAX_CHUNKS)
         score = estimate_domain_score(domain, selected)
         score.retrieved_chunk_ids = [chunk.chunk_id for chunk in selected]
         score.used_chunk_ids = [chunk.chunk_id for chunk in selected]
@@ -119,13 +160,18 @@ def run_parallel_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Repor
             )
         )
         timer.stop(f"score_{domain}")
+        logger.info("%s: analyst finished scoring (used %d chunks). result=%.2f", f"{domain}_analyst", len(selected), score.estimated_score)
         return score
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    # Parallelize domain scoring to simulate concurrent agents working at once.
+    # PARALLEL_MAX_WORKERS controls how many threads run simultaneously.
+    logger.info("Submitting parallel scoring tasks for domains: %s", ",".join(ALL_DOMAINS))
+    with ThreadPoolExecutor(max_workers=PARALLEL_MAX_WORKERS) as pool:
         futures = {pool.submit(_score, domain): domain for domain in ALL_DOMAINS}
         domain_scores = {}
         for fut in as_completed(futures):
             domain_scores[futures[fut]] = fut.result()
+    logger.info("Parallel scoring complete for domains: %s", ",".join(domain_scores.keys()))
 
     total_score = aggregate_total_score(domain_scores)
     comparison = _compare_to_ground_truth(total_score, report)
@@ -135,7 +181,7 @@ def run_parallel_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Repor
         trace,
         chunks,
         timer,
-        total_agent_calls=3,
+        total_agent_calls=PARALLEL_TOTAL_AGENT_CALLS,
         deliberation_stats=deliberation_quality(0, 1, 0, 1.0),
     )
 
@@ -161,15 +207,83 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
     trace: list[RetrievalEvent] = []
     domain_scores: dict[str, DomainScore] = {}
 
+    # Define small agent-like classes to represent manager and workers.
+    # These are lightweight in-process agents that encapsulate a name and
+    # a run() method so the handoff pattern uses explicit agents rather
+    # than anonymous thread tasks. They call the existing
+    # `estimate_domain_score` logic for scoring.
+    class WorkerAgent:
+        def __init__(self, name: str):
+            self.name = name
+
+        def run(self, domain: str, chunks_subset) -> DomainScore:
+            logger.info("%s: worker starting processing %d chunks for domain %s", self.name, len(chunks_subset), domain)
+            out = estimate_domain_score(domain, chunks_subset)
+            # annotate rationale with worker identity to preserve auditability
+            out.rationale = f"Processed by {self.name}. " + out.rationale
+            out.retrieved_chunk_ids = [c.chunk_id for c in chunks_subset]
+            out.used_chunk_ids = [c.chunk_id for c in chunks_subset]
+            logger.info("%s: worker finished processing for domain %s (score=%.2f)", self.name, domain, out.estimated_score)
+            return out
+
+    class ManagerAgent:
+        def __init__(self, name: str):
+            self.name = name
+
+        def delegate(self, workers: list[WorkerAgent], domain: str, groups: list[list]) -> list[DomainScore]:
+            # Submit worker work in parallel and return their DomainScore outputs.
+            outputs: list[DomainScore] = []
+            logger.info("%s: delegating %d groups to workers: %s", self.name, len(groups), ",".join(w.name for w in workers))
+            with ThreadPoolExecutor(max_workers=HANDOFF_MAX_WORKERS) as pool:
+                futures = {pool.submit(w.run, domain, grp): (w, grp) for w, grp in zip(workers, groups)}
+                for fut in as_completed(futures):
+                    w, grp = futures[fut]
+                    try:
+                        res = fut.result()
+                        outputs.append(res)
+                        logger.info("%s: worker %s completed delegation task for domain %s", self.name, w.name, domain)
+                    except Exception as e:
+                        logger.exception("%s: worker %s failed while processing domain %s: %s", self.name, w.name, domain, e)
+            return outputs
+
     for domain in ALL_DOMAINS:
         timer.start(f"score_{domain}")
-        selected = retrieve_for_domain(chunks, domain, max_chunks=8)
-        worker_groups = [selected[i::2] for i in range(2)]
+        # retrieve a slightly larger set of chunks for handoff, since the
+        # hierarchical aggregation spreads the evidence across worker groups.
+        selected = retrieve_for_domain(chunks, domain, max_chunks=HANDOFF_MAX_CHUNKS)
 
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = [pool.submit(estimate_domain_score, domain, group) for group in worker_groups if group]
-            worker_outputs = [future.result() for future in as_completed(futures)]
+        # Split the selected chunks evenly into HANDOFF_WORKER_GROUPS groups.
+        # The slice idiom selected[i::n] distributes items in a round-robin way
+        # to each worker group which emulates dividing responsibilities.
+        worker_groups = [selected[i::HANDOFF_WORKER_GROUPS] for i in range(HANDOFF_WORKER_GROUPS)]
 
+        # Create explicit manager and worker agents and delegate work.
+        manager_name = f"{domain}_manager"
+        manager_agent = ManagerAgent(manager_name)
+
+        # Create WorkerAgent instances for each non-empty group.
+        workers = [WorkerAgent(f"{manager_name}_worker_{i}") for i in range(len(worker_groups)) if worker_groups[i]]
+        groups = [group for group in worker_groups if group]
+
+        # Manager delegates the groups to the worker agents and collects outputs.
+        worker_outputs = manager_agent.delegate(workers, domain, groups)
+
+        # Record a RetrievalEvent per worker so the trace shows which worker
+        # handled which chunks, as well as a manager-level handoff event.
+        for w, grp, outp in zip(workers, groups, worker_outputs):
+            trace.append(
+                RetrievalEvent(
+                    agent_name=w.name,
+                    domain=domain,
+                    query=f"{domain} worker processing",
+                    retrieved_chunk_ids=[c.chunk_id for c in grp],
+                    used_chunk_ids=outp.used_chunk_ids,
+                )
+            )
+
+        # Merge worker group outputs by averaging their numeric estimates and
+        # concatenating rationales. This is a simple aggregation strategy that
+        # approximates hierarchical consensus.
         if worker_outputs:
             merged_score = round(mean(item.estimated_score for item in worker_outputs), 2)
             merged_conf = round(mean(item.confidence for item in worker_outputs), 3)
@@ -191,9 +305,9 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
 
         trace.append(
             RetrievalEvent(
-                agent_name=f"{domain}_analyst_handoff",
+                agent_name=manager_name,
                 domain=domain,
-                query=f"{domain} handoff",
+                query=f"{domain} handoff (delegated to {len(worker_groups)} workers)",
                 retrieved_chunk_ids=out.retrieved_chunk_ids,
                 used_chunk_ids=out.used_chunk_ids,
             )
@@ -209,7 +323,7 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
         trace,
         chunks,
         timer,
-        total_agent_calls=9,
+        total_agent_calls=HANDOFF_TOTAL_AGENT_CALLS,
         deliberation_stats=deliberation_quality(0, 1, 0, 1.0),
     )
 
@@ -225,7 +339,7 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
     )
 
 
-def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, max_rounds: int = 3) -> ReportRunResult:
+def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, max_rounds: int = REVIEW_MAX_ROUNDS) -> ReportRunResult:
     # max_rounds controls the maximum critique-adjust iterations per ESG domain scorer.
     timer = Timer()
     timer.start("parse_report")
@@ -241,7 +355,10 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
 
     for domain in ALL_DOMAINS:
         timer.start(f"score_{domain}")
-        selected = retrieve_for_domain(chunks, domain, max_chunks=6)
+        # Initial retrieval for the review-and-critique pattern. We fetch a
+        # bounded set of chunks for the initial estimate and then separately
+        # fetch smaller sets used specifically for critique rounds.
+        selected = retrieve_for_domain(chunks, domain, max_chunks=REVIEW_MAX_CHUNKS)
         current = estimate_domain_score(domain, selected)
         current.retrieved_chunk_ids = [chunk.chunk_id for chunk in selected]
         current.used_chunk_ids = [chunk.chunk_id for chunk in selected]
@@ -249,7 +366,11 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
 
         while rounds < max_rounds:
             rounds += 1
-            critique_chunks = retrieve_for_domain(chunks, domain, max_chunks=4)
+            # For each critique round we retrieve additional, focused evidence
+            # (REVIEW_CRITIQUE_CHUNKS) and ask the critique/adjust routine to
+            # propose a revised estimate. If the scorer adjusts its estimate we
+            # consider that a conflict+resolution; otherwise we stop early.
+            critique_chunks = retrieve_for_domain(chunks, domain, max_chunks=REVIEW_CRITIQUE_CHUNKS)
             revised, stats = critique_and_adjust(domain, current, critique_chunks)
             if stats["adjusted"]:
                 conflicts += 1
@@ -282,7 +403,7 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
         trace,
         chunks,
         timer,
-        total_agent_calls=6,
+        total_agent_calls=REVIEW_TOTAL_AGENT_CALLS,
         deliberation_stats=deliberation,
     )
 
