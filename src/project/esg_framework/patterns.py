@@ -282,11 +282,9 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
             for _, grp, item in worker_outputs:
                 weighted_parts.append((max(0.1, item.confidence) * max(1, len(grp)), item))
             total_weight = sum(weight for weight, _ in weighted_parts) or 1.0
-            workers_blend = sum(weight * item.estimated_score for weight, item in weighted_parts) / total_weight
-            workers_conf = sum(weight * item.confidence for weight, item in weighted_parts) / total_weight
-            prior_anchor = DOMAIN_SCORE_PRIORS.get(domain, 8.0)
-            merged_score = round((0.85 * workers_blend) + (0.15 * prior_anchor), 2)
-            merged_conf = round(min(0.95, workers_conf + 0.02), 3)
+            merged_score = round(sum(weight * item.estimated_score for weight, item in weighted_parts) / total_weight, 2)
+            merged_conf = round(sum(weight * item.confidence for weight, item in weighted_parts) / total_weight, 3)
+            merged_conf = round(min(0.95, merged_conf), 3)
             merged_rationale = " ".join(item.rationale for _, _, item in worker_outputs)
         else:
             fallback = estimate_domain_score(domain, selected)

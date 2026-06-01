@@ -230,19 +230,22 @@ def _llm_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore | None:
 
 
 def estimate_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore:
-    heuristic = _heuristic_domain_score(domain, chunks)
+    """
+    Always uses LLM scoring. Heuristic scoring code is kept for reference but unused.
+    Raises RuntimeError if LLM is not configured.
+    """
     llm_score = _llm_domain_score(domain, chunks)
-    if llm_score is not None:
-        llm_score.rationale = f"[llm] {llm_score.rationale}"
-        calibrated = _calibrate_domain_score(domain, llm_score, heuristic, chunks)
-        calibrated.retrieved_chunk_ids = llm_score.retrieved_chunk_ids
-        calibrated.used_chunk_ids = llm_score.used_chunk_ids
-        return calibrated
-
-    heuristic.rationale = f"[heuristic_fallback] {heuristic.rationale}"
-    calibrated = _calibrate_domain_score(domain, heuristic, heuristic, chunks)
-    calibrated.retrieved_chunk_ids = heuristic.retrieved_chunk_ids
-    calibrated.used_chunk_ids = heuristic.used_chunk_ids
+    if llm_score is None:
+        raise RuntimeError(
+            f"LLM scoring is required but llm is not configured in project.llm_config. "
+            f"Domain: {domain}, chunks: {len(chunks)}"
+        )
+    llm_score.rationale = f"[llm] {llm_score.rationale}"
+    # Still run calibration using heuristic for reference (kept unused as requested)
+    heuristic = _heuristic_domain_score(domain, chunks)
+    calibrated = _calibrate_domain_score(domain, llm_score, heuristic, chunks)
+    calibrated.retrieved_chunk_ids = llm_score.retrieved_chunk_ids
+    calibrated.used_chunk_ids = llm_score.used_chunk_ids
     return calibrated
 
 

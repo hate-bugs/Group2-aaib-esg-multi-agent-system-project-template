@@ -10,7 +10,8 @@ from project.esg_framework.models import DomainScore, RetrievalEvent
 # Markers expected in rationale templates for lightweight grounding checks.
 # Limitation: this is a format-dependent heuristic, not semantic fact verification.
 # Claims without these markers are treated as likely unsupported in local hallucination estimates.
-SUPPORTED_MARKERS = ("Detected", "Used")
+# Includes [llm] prefix used by LLM scoring and critique patterns.
+SUPPORTED_MARKERS = ("Detected", "Used", "[llm]", "[FALLBACK]", "Critique applied")
 PARTIAL_MARKER = "heuristic"
 TOTAL_SCORE_MAX = 20.0
 
