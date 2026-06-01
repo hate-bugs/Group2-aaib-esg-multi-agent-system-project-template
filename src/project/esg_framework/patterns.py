@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from statistics import mean
-from typing import Callable
 
 from project.esg_framework.chunking import split_report_to_chunks
-from project.esg_framework.heuristics import ALL_DOMAINS
+from project.esg_framework.heuristics import ALL_DOMAINS, DOMAIN_SCORE_PRIORS
 from project.esg_framework.metrics import (
     Timer,
     accuracy_from_mae,
@@ -30,12 +28,6 @@ logger = logging.getLogger(__name__)
 if not logging.getLogger().hasHandlers():
     logging.basicConfig(level=logging.INFO)
 
-
-DomainScorer = Callable[[str], DomainScore]
-
-
-# Configuration constants driven by environment variables so behaviour can be tuned
-# without changing code. Each variable has a clear purpose documented below.
 # PATTERN_PARALLEL_MAX_WORKERS: threadpool size for the parallel/concurrent pattern
 PARALLEL_MAX_WORKERS = int(os.getenv("PATTERN_PARALLEL_MAX_WORKERS", "3"))
 # PATTERN_PARALLEL_MAX_CHUNKS: max chunks retrieved per domain in parallel pattern
@@ -230,9 +222,9 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
         def __init__(self, name: str):
             self.name = name
 
-        def delegate(self, workers: list[WorkerAgent], domain: str, groups: list[list]) -> list[DomainScore]:
+        def delegate(self, workers: list[WorkerAgent], domain: str, groups: list[list]) -> list[tuple["WorkerAgent", list, DomainScore]]:
             # Submit worker work in parallel and return their DomainScore outputs.
-            outputs: list[DomainScore] = []
+            outputs: list[tuple[WorkerAgent, list, DomainScore]] = []
             logger.info("%s: delegating %d groups to workers: %s", self.name, len(groups), ",".join(w.name for w in workers))
             with ThreadPoolExecutor(max_workers=HANDOFF_MAX_WORKERS) as pool:
                 futures = {pool.submit(w.run, domain, grp): (w, grp) for w, grp in zip(workers, groups)}
@@ -240,7 +232,7 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
                     w, grp = futures[fut]
                     try:
                         res = fut.result()
-                        outputs.append(res)
+                        outputs.append((w, grp, res))
                         logger.info("%s: worker %s completed delegation task for domain %s", self.name, w.name, domain)
                     except Exception as e:
                         logger.exception("%s: worker %s failed while processing domain %s: %s", self.name, w.name, domain, e)
@@ -270,7 +262,7 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
 
         # Record a RetrievalEvent per worker so the trace shows which worker
         # handled which chunks, as well as a manager-level handoff event.
-        for w, grp, outp in zip(workers, groups, worker_outputs):
+        for w, grp, outp in worker_outputs:
             trace.append(
                 RetrievalEvent(
                     agent_name=w.name,
@@ -285,9 +277,16 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
         # concatenating rationales. This is a simple aggregation strategy that
         # approximates hierarchical consensus.
         if worker_outputs:
-            merged_score = round(mean(item.estimated_score for item in worker_outputs), 2)
-            merged_conf = round(mean(item.confidence for item in worker_outputs), 3)
-            merged_rationale = " ".join(item.rationale for item in worker_outputs)
+            weighted_parts = []
+            for _, grp, item in worker_outputs:
+                weighted_parts.append((max(0.1, item.confidence) * max(1, len(grp)), item))
+            total_weight = sum(weight for weight, _ in weighted_parts) or 1.0
+            workers_blend = sum(weight * item.estimated_score for weight, item in weighted_parts) / total_weight
+            workers_conf = sum(weight * item.confidence for weight, item in weighted_parts) / total_weight
+            prior_anchor = DOMAIN_SCORE_PRIORS.get(domain, 8.0)
+            merged_score = round((0.85 * workers_blend) + (0.15 * prior_anchor), 2)
+            merged_conf = round(min(0.95, workers_conf + 0.02), 3)
+            merged_rationale = " ".join(item.rationale for _, _, item in worker_outputs)
         else:
             fallback = estimate_domain_score(domain, selected)
             merged_score = fallback.estimated_score
@@ -370,8 +369,19 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
             # (REVIEW_CRITIQUE_CHUNKS) and ask the critique/adjust routine to
             # propose a revised estimate. If the scorer adjusts its estimate we
             # consider that a conflict+resolution; otherwise we stop early.
-            critique_chunks = retrieve_for_domain(chunks, domain, max_chunks=REVIEW_CRITIQUE_CHUNKS)
+            already_used = set(current.used_chunk_ids)
+            critique_chunks = retrieve_for_domain(
+                chunks,
+                domain,
+                max_chunks=REVIEW_CRITIQUE_CHUNKS,
+                exclude_chunk_ids=already_used,
+                min_score=0.8,
+            )
+            if not critique_chunks:
+                break
             revised, stats = critique_and_adjust(domain, current, critique_chunks)
+            revised.retrieved_chunk_ids = list(dict.fromkeys(current.retrieved_chunk_ids + [c.chunk_id for c in critique_chunks]))
+            revised.used_chunk_ids = list(dict.fromkeys(current.used_chunk_ids + [c.chunk_id for c in critique_chunks]))
             if stats["adjusted"]:
                 conflicts += 1
                 resolved += 1
