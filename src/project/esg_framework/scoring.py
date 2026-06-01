@@ -265,24 +265,228 @@ def aggregate_confidence(domain_scores: dict[str, DomainScore]) -> float:
     return round(mean(score.confidence for score in domain_scores.values()), 3)
 
 
-def critique_and_adjust(domain: str, candidate: DomainScore, critique_chunks: list[Chunk]) -> tuple[DomainScore, dict[str, float | bool]]:
-    critique = estimate_domain_score(domain, critique_chunks)
-    gap = abs(candidate.estimated_score - critique.estimated_score)
-    needs_adjustment = gap > 2.5 and critique.confidence >= candidate.confidence
-    if not needs_adjustment:
-        return candidate, {"adjusted": False, "gap": round(gap, 2)}
+def _build_critique_prompt(
+    domain: str,
+    candidate_score: float,
+    candidate_rationale: str,
+    critique_chunks: list[Chunk],
+    used_chunk_ids: list[str],
+) -> str:
+    """Build a prompt for the critique agent to evaluate the candidate's rationale and evidence."""
+    evidence = []
+    for chunk in critique_chunks:
+        text = chunk.text.strip().replace("\n", " ")
+        evidence.append(f"[{chunk.chunk_id}] {text[:MAX_LLM_CHUNK_CHARS]}")
+    evidence_block = "\n\n".join(evidence) if evidence else "[NO_ADDITIONAL_EVIDENCE]"
 
-    merged_score = round((candidate.estimated_score + critique.estimated_score) / 2.0, 2)
-    merged_conf = round(max(candidate.confidence, critique.confidence), 3)
-    updated = DomainScore(
-        estimated_score=merged_score,
-        confidence=merged_conf,
-        rationale=(
-            f"Detected critique gap={gap:.2f}. Used initial rationale: {candidate.rationale} "
-            f"Used critique rationale: {critique.rationale}"
-        ),
-        label=score_label(merged_score),
-        retrieved_chunk_ids=list(dict.fromkeys(candidate.retrieved_chunk_ids + critique.retrieved_chunk_ids)),
-        used_chunk_ids=list(dict.fromkeys(candidate.used_chunk_ids + critique.used_chunk_ids)),
+    rubric = "\n".join(f"- {band}: {desc}" for band, desc in SCORING_RUBRIC.items())
+    heuristic = DOMAIN_HEURISTICS.get(domain, "N/A")
+
+    return (
+        "You are an ESG Critique Agent. Your role is to review a domain scorer's work and provide grounded feedback.\n\n"
+        f"Domain: {domain}\n"
+        f"Candidate's current score: {candidate_score}/20\n"
+        f"Candidate's rationale:\n{candidate_rationale}\n\n"
+        "Your task:\n"
+        "1. Carefully review the candidate's rationale and scoring decision.\n"
+        "2. Examine the additional evidence chunks provided below.\n"
+        "3. Identify:\n"
+        "   - Gaps: What important evidence or criteria are missing from the rationale?\n"
+        "   - Overstatements: Are there claims not supported by evidence?\n"
+        "   - Understatements: Is the score too conservative given the evidence?\n"
+        "   - Biases: Any systematic lean (optimism/pessimism) in the reasoning?\n"
+        "4. Assess whether the current score is appropriate given ALL available evidence (original + new chunks).\n\n"
+        f"Domain heuristic checklist: {heuristic}\n\n"
+        f"Scoring rubric:\n{rubric}\n\n"
+        "Scoring discipline:\n"
+        "1) Start near a neutral prior and move up only with explicit evidence.\n"
+        "2) Keep score <= 8 if evidence is generic or lacks measurable targets/results.\n"
+        "3) Keep score <= 12 unless evidence shows clear governance ownership plus risk methods and monitoring outcomes.\n"
+        "4) Use > 16 only for exceptional, comprehensive, and quantified evidence across strategy, governance, and risk management.\n\n"
+        "Return strict JSON with these keys:\n"
+        "- feedback (string): Your critique of the candidate's rationale (2-3 sentences)\n"
+        "- missing_evidence (list of strings): Specific gaps or missing criteria\n"
+        "- overstated_claims (list of strings): Claims not supported by evidence\n"
+        "- recommended_score (number): Your suggested score (0-20) based on ALL evidence\n"
+        "- confidence (number 0-1): Your confidence in the recommended score\n"
+        "- adjustment_direction (string): 'increase', 'decrease', or 'no_change'\n"
+        "Do not include markdown.\n\n"
+        f"Additional evidence chunks:\n{evidence_block}"
     )
-    return updated, {"adjusted": True, "gap": round(gap, 2)}
+
+
+def _extract_critique_response(raw_text: str) -> dict | None:
+    """Extract and validate the critique agent's JSON response."""
+    if not raw_text:
+        return None
+    try:
+        return json.loads(raw_text)
+    except (TypeError, json.JSONDecodeError):
+        pass
+
+    match = re.search(r"\{.*\}", raw_text, flags=re.DOTALL)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+
+
+def _call_critique_llm(prompt: str) -> dict | None:
+    """Call the LLM to get a critique response."""
+    try:
+        from project.llm_config import llm
+    except Exception:
+        return None
+
+    response = None
+    for method_name in ("call", "invoke", "predict"):
+        method = getattr(llm, method_name, None)
+        if callable(method):
+            try:
+                response = method(prompt)
+                break
+            except Exception:
+                continue
+    if response is None:
+        return None
+
+    if isinstance(response, dict):
+        parsed = response
+    else:
+        parsed = _extract_critique_response(str(response))
+    if not isinstance(parsed, dict):
+        return None
+    return parsed
+
+
+def critique_and_adjust(domain: str, candidate: DomainScore, critique_chunks: list[Chunk]) -> tuple[DomainScore, dict[str, float | bool]]:
+    """
+    Use an LLM-based critique agent to evaluate the candidate's rationale and suggest adjustments.
+    
+    The critique agent reviews:
+    1. The candidate's current score and rationale
+    2. Additional evidence chunks not used in the initial scoring
+    3. Provides feedback on gaps, overstatements, and biases
+    4. Recommends an adjusted score based on ALL evidence
+    
+    Returns the adjusted DomainScore and stats about the adjustment.
+    """
+    if not critique_chunks:
+        return candidate, {"adjusted": False, "gap": 0.0, "feedback": "No critique chunks provided"}
+
+    # Build the critique prompt
+    prompt = _build_critique_prompt(
+        domain=domain,
+        candidate_score=candidate.estimated_score,
+        candidate_rationale=candidate.rationale,
+        critique_chunks=critique_chunks,
+        used_chunk_ids=candidate.used_chunk_ids,
+    )
+
+    # Get critique from LLM
+    critique_response = _call_critique_llm(prompt)
+    
+    if critique_response is None:
+        # Fallback to simple re-scoring if LLM call fails
+        critique = estimate_domain_score(domain, critique_chunks)
+        gap = abs(candidate.estimated_score - critique.estimated_score)
+        needs_adjustment = gap > 1.5  # Relaxed threshold without confidence barrier
+        if not needs_adjustment:
+            return candidate, {"adjusted": False, "gap": round(gap, 2), "feedback": "LLM unavailable, no adjustment"}
+
+        merged_score = round((candidate.estimated_score + critique.estimated_score) / 2.0, 2)
+        merged_conf = round(max(candidate.confidence, critique.confidence), 3)
+        updated = DomainScore(
+            estimated_score=merged_score,
+            confidence=merged_conf,
+            rationale=(
+                f"[FALLBACK] Detected gap={gap:.2f}. Initial: {candidate.rationale} | "
+                f"Critique: {critique.rationale}"
+            ),
+            label=score_label(merged_score),
+            retrieved_chunk_ids=list(dict.fromkeys(candidate.retrieved_chunk_ids + critique.retrieved_chunk_ids)),
+            used_chunk_ids=list(dict.fromkeys(candidate.used_chunk_ids + critique.used_chunk_ids)),
+        )
+        return updated, {"adjusted": True, "gap": round(gap, 2), "feedback": "Fallback re-scoring applied"}
+
+    # Parse and validate the critique response
+    feedback = critique_response.get("feedback", "")
+    missing = critique_response.get("missing_evidence", [])
+    overstated = critique_response.get("overstated_claims", [])
+    adjustment_direction = critique_response.get("adjustment_direction", "no_change")
+    
+    try:
+        recommended_score = float(critique_response.get("recommended_score", candidate.estimated_score))
+        recommended_score = max(0.0, min(MAX_SCORE, recommended_score))
+        critique_confidence = float(critique_response.get("confidence", candidate.confidence))
+        critique_confidence = max(0.0, min(1.0, critique_confidence))
+    except (TypeError, ValueError):
+        return candidate, {"adjusted": False, "gap": 0.0, "feedback": "Invalid critique response format"}
+
+    gap = abs(candidate.estimated_score - recommended_score)
+    
+    # Determine if we should adjust
+    # We adjust if: there's a meaningful gap, OR there are specific feedback items
+    has_feedback = bool(feedback) or bool(missing) or bool(overstated)
+    needs_adjustment = gap > 1.0 or (has_feedback and adjustment_direction != "no_change")
+    
+    if not needs_adjustment:
+        return candidate, {
+            "adjusted": False,
+            "gap": round(gap, 2),
+            "feedback": feedback,
+            "missing_evidence": missing,
+            "overstated_claims": overstated,
+        }
+
+    # Apply the adjustment
+    # Use a weighted blend: more weight to critique if it has high confidence
+    # and provides substantial feedback
+    feedback_weight = min(0.7, 0.3 + (0.4 * critique_confidence))
+    if gap > 5.0:
+        # Large gap: trust the critique more
+        adjusted_score = round(recommended_score, 2)
+        adjusted_conf = round(critique_confidence, 3)
+    else:
+        # Blend the scores
+        adjusted_score = round(
+            (candidate.estimated_score * (1.0 - feedback_weight)) + (recommended_score * feedback_weight),
+            2
+        )
+        adjusted_conf = round(
+            max(candidate.confidence, critique_confidence) * 0.95 + 0.05,
+            3
+        )
+
+    # Build the new rationale incorporating the critique
+    missing_str = f" Missing evidence: {', '.join(missing[:3])}" if missing else ""
+    overstated_str = f" Overstated: {', '.join(overstated[:3])}" if overstated else ""
+    adjustment_str = f" [{adjustment_direction.upper()}]" if adjustment_direction != "no_change" else ""
+    
+    new_rationale = (
+        f"Critique applied{adjustment_str}: {feedback}."
+        f"{missing_str}{overstated_str}\n"
+        f"Original rationale: {candidate.rationale}"
+    )
+
+    updated = DomainScore(
+        estimated_score=adjusted_score,
+        confidence=adjusted_conf,
+        rationale=new_rationale,
+        label=score_label(adjusted_score),
+        retrieved_chunk_ids=list(dict.fromkeys(candidate.retrieved_chunk_ids + [c.chunk_id for c in critique_chunks])),
+        used_chunk_ids=list(dict.fromkeys(candidate.used_chunk_ids + [c.chunk_id for c in critique_chunks])),
+    )
+
+    return updated, {
+        "adjusted": True,
+        "gap": round(gap, 2),
+        "feedback": feedback,
+        "missing_evidence": missing,
+        "overstated_claims": overstated,
+        "adjustment_direction": adjustment_direction,
+        "critique_score": round(recommended_score, 2),
+        "critique_confidence": round(critique_confidence, 3),
+    }

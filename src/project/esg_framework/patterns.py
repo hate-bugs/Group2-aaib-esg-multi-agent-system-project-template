@@ -47,11 +47,12 @@ REVIEW_CRITIQUE_CHUNKS = int(os.getenv("PATTERN_REVIEW_CRITIQUE_CHUNKS", "4"))
 # PATTERN_REVIEW_MAX_ROUNDS: maximum critique-adjust rounds per domain
 REVIEW_MAX_ROUNDS = int(os.getenv("PATTERN_REVIEW_MAX_ROUNDS", "3"))
 
-# Total agent call estimates used for latency/efficiency metrics. These are
-# approximate counts of model calls performed per pattern and can be tuned.
-PARALLEL_TOTAL_AGENT_CALLS = int(os.getenv("PATTERN_PARALLEL_TOTAL_AGENT_CALLS", "3"))
-HANDOFF_TOTAL_AGENT_CALLS = int(os.getenv("PATTERN_HANDOFF_TOTAL_AGENT_CALLS", "9"))
-REVIEW_TOTAL_AGENT_CALLS = int(os.getenv("PATTERN_REVIEW_TOTAL_AGENT_CALLS", "6"))
+# Total agent call estimates used for latency/efficiency metrics.
+# Computed programmatically from the number of domains and pattern-specific config.
+NUM_DOMAINS = len(ALL_DOMAINS)  # 3: environmental, social, governance
+PARALLEL_TOTAL_AGENT_CALLS = NUM_DOMAINS * 1  # 1 call per domain
+HANDOFF_TOTAL_AGENT_CALLS = NUM_DOMAINS * HANDOFF_WORKER_GROUPS  # N workers per domain
+REVIEW_TOTAL_AGENT_CALLS = NUM_DOMAINS * (1 + REVIEW_MAX_ROUNDS)  # 1 initial + N critique rounds per domain
 
 
 def _ground_truth_weighted_total(report: ReportRecord, weights: dict[str, float] | None = None) -> float:
@@ -339,6 +340,18 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
 
 
 def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, max_rounds: int = REVIEW_MAX_ROUNDS) -> ReportRunResult:
+    """
+    Run the review & critique pattern where:
+    1. Domain agent analyzes chunks and produces initial score with rationale
+    2. Review & critique agent evaluates the rationale and provides feedback
+    3. Domain agent's score is adjusted based on the critique feedback
+    
+    This pattern uses an LLM-based critique agent that:
+    - Reviews the candidate's score and rationale
+    - Examines additional evidence chunks
+    - Identifies gaps, overstatements, and biases
+    - Recommends an adjusted score based on ALL evidence
+    """
     # max_rounds controls the maximum critique-adjust iterations per ESG domain scorer.
     timer = Timer()
     timer.start("parse_report")
@@ -351,6 +364,7 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
     conflicts = 0
     resolved = 0
     dominance_counter: dict[str, int] = {}
+    total_critique_feedback: list[dict] = []
 
     for domain in ALL_DOMAINS:
         timer.start(f"score_{domain}")
@@ -362,6 +376,7 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
         current.retrieved_chunk_ids = [chunk.chunk_id for chunk in selected]
         current.used_chunk_ids = [chunk.chunk_id for chunk in selected]
         rounds = 0
+        domain_feedback: list[dict] = []
 
         while rounds < max_rounds:
             rounds += 1
@@ -379,9 +394,20 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
             )
             if not critique_chunks:
                 break
+            
             revised, stats = critique_and_adjust(domain, current, critique_chunks)
-            revised.retrieved_chunk_ids = list(dict.fromkeys(current.retrieved_chunk_ids + [c.chunk_id for c in critique_chunks]))
-            revised.used_chunk_ids = list(dict.fromkeys(current.used_chunk_ids + [c.chunk_id for c in critique_chunks]))
+            
+            # Record feedback from this critique round
+            domain_feedback.append({
+                "round": rounds,
+                "adjusted": stats.get("adjusted", False),
+                "gap": stats.get("gap", 0.0),
+                "feedback": stats.get("feedback", ""),
+                "adjustment_direction": stats.get("adjustment_direction", "no_change"),
+                "missing_evidence": stats.get("missing_evidence", []),
+                "overstated_claims": stats.get("overstated_claims", []),
+            })
+            
             if stats["adjusted"]:
                 conflicts += 1
                 resolved += 1
@@ -389,12 +415,18 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
             else:
                 break
 
+        total_critique_feedback.append({
+            "domain": domain,
+            "rounds": rounds,
+            "feedback": domain_feedback,
+        })
+        
         dominance_counter[domain] = 1 if rounds == 1 else 0
         trace.append(
             RetrievalEvent(
                 agent_name=f"{domain}_analyst_with_critique",
                 domain=domain,
-                query=f"{domain} critique",
+                query=f"{domain} critique (rounds={rounds})",
                 retrieved_chunk_ids=current.retrieved_chunk_ids,
                 used_chunk_ids=current.used_chunk_ids,
             )
@@ -426,5 +458,9 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
         retrieval_trace=trace,
         comparison=comparison,
         metrics=metrics,
-        metadata={"conflicts": conflicts, "resolved": resolved},
+        metadata={
+            "conflicts": conflicts,
+            "resolved": resolved,
+            "critique_feedback": total_critique_feedback,
+        },
     )
