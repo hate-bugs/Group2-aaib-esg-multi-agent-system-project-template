@@ -151,17 +151,17 @@ def _calibrate_domain_score(
     strength = _evidence_strength(domain, chunks)
     quality = _evidence_quality_score(chunks)
 
-    anchor = (0.55 * heuristic_score.estimated_score) + (0.45 * prior)
+    anchor = (0.5 * heuristic_score.estimated_score) + (0.5 * prior)
     confidence_factor = max(0.0, min(1.0, base_score.confidence))
     llm_delta = base_score.estimated_score - anchor
-    blend_alpha = 0.15 + (0.5 * strength) + (0.15 * confidence_factor)
+    blend_alpha = 0.22 + (0.5 * strength) + (0.18 * confidence_factor)
     if llm_delta > 0 and quality < 0.35:
-        blend_alpha *= 0.55
-    blend_alpha = max(0.1, min(0.68, blend_alpha))
+        blend_alpha *= 0.65
+    blend_alpha = max(0.14, min(0.78, blend_alpha))
     calibrated = anchor + (blend_alpha * llm_delta)
 
     # Keep optimistic tails under control unless evidence quality is genuinely strong.
-    evidence_cap = min(MAX_SCORE, prior + 3.0 + (10.0 * quality))
+    evidence_cap = min(MAX_SCORE, prior + 4.0 + (11.0 * quality))
     if calibrated > evidence_cap:
         calibrated = evidence_cap
 
@@ -173,9 +173,9 @@ def _calibrate_domain_score(
     )
 
     rationale = (
-        f"Used {len(chunks)} retrieved chunks. Evidence strength={strength:.2f}, quality={quality:.2f}. "
-        f"Calibrated with heuristic anchor and healthcare prior ({prior:.2f}) using conservative rubric gating. "
-        f"Base rationale: {base_score.rationale}"
+        f"Used {len(chunks)} retrieved chunks. Detected evidence strength={strength:.2f}, quality={quality:.2f}. "
+        f"Detected calibration anchor from heuristic and healthcare prior ({prior:.2f}) with rubric gating. "
+        f"Used base rationale: {base_score.rationale}"
     )
 
     return DomainScore(
@@ -278,8 +278,8 @@ def critique_and_adjust(domain: str, candidate: DomainScore, critique_chunks: li
         estimated_score=merged_score,
         confidence=merged_conf,
         rationale=(
-            f"Initial score revised after critique. Original rationale: {candidate.rationale} "
-            f"Critique rationale: {critique.rationale}"
+            f"Detected critique gap={gap:.2f}. Used initial rationale: {candidate.rationale} "
+            f"Used critique rationale: {critique.rationale}"
         ),
         label=score_label(merged_score),
         retrieved_chunk_ids=list(dict.fromkeys(candidate.retrieved_chunk_ids + critique.retrieved_chunk_ids)),
