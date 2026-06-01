@@ -51,11 +51,16 @@ def retrieve_for_domain(
     chunks: list[Chunk],
     domain: str,
     max_chunks: int = 8,
+    exclude_chunk_ids: set[str] | None = None,
+    min_score: float = 1.2,
 ) -> list[Chunk]:
     keywords = DOMAIN_KEYWORDS.get(domain, set())
+    excluded = exclude_chunk_ids or set()
 
     scored: list[tuple[float, float, Chunk]] = []
     for chunk in chunks:
+        if chunk.chunk_id in excluded:
+            continue
         text = chunk.text.lower()
         # Score both total hits and keyword diversity to avoid over-valuing repeated single-term mentions.
         keyword_hits = sum(min(text.count(token), 3) for token in keywords)
@@ -68,8 +73,12 @@ def retrieve_for_domain(
         scored.append((score, chunk.weight, chunk))
 
     scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    selected = [item[2] for item in scored if item[0] > 1.2][:max_chunks]
+    selected = [item[2] for item in scored if item[0] > min_score][:max_chunks]
     if not selected:
         # Fallback keeps deterministic order while still preferring larger, more informative chunks.
-        selected = sorted(chunks, key=lambda c: c.token_count, reverse=True)[:max_chunks]
+        selected = [
+            chunk
+            for chunk in sorted(chunks, key=lambda c: c.token_count, reverse=True)
+            if chunk.chunk_id not in excluded
+        ][:max_chunks]
     return selected
