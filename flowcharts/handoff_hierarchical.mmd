@@ -1,33 +1,33 @@
 flowchart TD
-  %% Handoff Hierarchical ESG Flow (conceptual)
+  %% Handoff Hierarchical ESG Flow (conceptual, updated to reflect code changes)
   Start([Start]) --> LoadData["Load preprocessed report/dataset"]
   LoadData --> Segment["Segment report into content chunks for retrieval"]
-  Segment --> Store["Store chunks in retrieval/index store (ChunkStore)"]
-  Store --> Prepare["Log/Timer: parse timing recorded"]
+  Segment --> Store["Store chunks in retrieval/index store (ChunkStore) via chunk_store.put(report_id, chunks)"]
+  Store --> Prepare["Log/Timer: parse timing recorded (Timer.start/stop per domain)"]
 
   subgraph DomainLoop [Process each ESG domain sequentially]
     direction TB
-    DomainStart["Select next domain to evaluate (environmental/social/governance)"] --> Retrieve["Retrieve a broader set of relevant chunks for that domain"]
-    Retrieve --> Partition["Partition retrieved chunks across hierarchical worker groups (split work among specialists)"]
-    Partition --> ParallelWorkers["Each worker group analyzes its subset in parallel and returns a partial judgment"]
-    ParallelWorkers --> MergeDecision["Are multiple worker outputs available?"]
-    MergeDecision -- Yes --> Merge["Merge worker judgments into a single domain score (e.g. average score, combined rationale)"]
-    MergeDecision -- No --> SingleAnalyst["Fallback: single analyst forms the domain judgment"]
-    Merge --> FinalizeDomain["Finalize DomainScore with merged score, confidence, rationale, and used chunks"]
+    DomainStart["Select next domain to evaluate (environmental/social/governance)"] --> Retrieve["Retrieve a broader set of relevant chunks for that domain (HANDOFF_MAX_CHUNKS)"]
+    Retrieve --> Partition["Partition retrieved chunks across hierarchical worker groups (split work among HANDOFF_WORKER_GROUPS)"]
+    Partition --> ParallelWorkers["Each worker group (WorkerAgent) analyzes its subset in parallel and returns a partial DomainScore (estimate_domain_score)"]
+    ParallelWorkers --> MergeDecision["Multiple worker outputs available?"]
+    MergeDecision -- Yes --> Merge["Merge worker judgments: average numeric estimates, average confidences, concat rationales; annotate rationale with worker identity"]
+    MergeDecision -- No --> SingleAnalyst["Fallback: single analyst forms the domain judgment (estimate_domain_score)"]
+    Merge --> FinalizeDomain["Finalize DomainScore with merged score, confidence, rationale, retrieved/used chunk ids"]
     SingleAnalyst --> FinalizeDomain
-    FinalizeDomain --> RecordTrace["Record retrieval & worker trace (who used which chunks)"]
+    FinalizeDomain --> RecordTrace["Record RetrievalEvent(s) per worker and manager (trace of who used which chunks)"]
     RecordTrace --> NextDomain["Store domain score & proceed to next domain"]
   end
 
-  DomainLoop --> Aggregate["Aggregate domain scores into total score & overall confidence"]
-  Aggregate --> Evaluate["Compute metrics: coverage, hallucination, agreement, latency, MAE/accuracy, deliberation"]
-  Evaluate --> Compare["Compare predicted total to ground truth"]
+  DomainLoop --> Aggregate["Aggregate domain scores into total score & overall confidence (aggregate_total_score, aggregate_confidence)"]
+  Aggregate --> Evaluate["Compute metrics: coverage, hallucination, agreement, latency, MAE/accuracy, deliberation (use Timer durations & retrieval trace)"]
+  Evaluate --> Compare["Compare predicted total to ground truth (compute error, direction, pct)"]
   Compare --> Result["Produce final run result (pattern=handoff_hierarchical) with domain scores, traces, metrics"]
   Result --> End([End])
 
-  %% Key differences: hierarchical handoff divides work across worker groups, then aggregates — more agent calls, increased deliberation and potential for richer rationales
+  %% Key differences: hierarchical handoff uses ManagerAgent/WorkerAgent, delegates groups via ThreadPoolExecutor; records worker-level RetrievalEvents and a manager-level handoff event; uses HANDOFF_MAX_CHUNKS and HANDOFF_WORKER_GROUPS
   classDef note fill:#fffae6,stroke:#333,stroke-width:1px;
-  Note["Key: hierarchical handoff → parallel sub-workers per domain; outputs merged into final domain judgment; higher compute & deliberation"]:::note
+  Note["Key: ManagerAgent delegates groups to WorkerAgent instances; worker outputs merged (mean scores, concat rationales); higher agent calls & deliberation; worker identity preserved in rationale"]:::note
   DomainLoop --> Note
 
 
