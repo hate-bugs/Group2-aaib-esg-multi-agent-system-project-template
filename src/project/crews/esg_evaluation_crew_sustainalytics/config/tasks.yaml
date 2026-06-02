@@ -1,0 +1,73 @@
+identify_material_esg_issues_task:
+  description: >
+    Identify and assess Material ESG Issues (MEIs) relevant to the company's subindustry and business model.
+    Review the company's subindustry and business model to identify MEIs from the Sustainalytics list.
+    Assess materiality and evaluate subindustry exposure scores for each relevant MEI.
+  expected_output: >
+    JSON object with keys: relevant_meis (list of MEI names), subindustry_exposure_scores (dict mapping MEI to score), materiality_assessment (dict with rationale for each MEI).
+  agent: material_esg_analyst
+
+assess_governance_task:
+  description: >
+    Assess Corporate Governance and Stakeholder Governance as baseline MEIs.
+    Evaluate transparency, accountability, and stakeholder perspectives.
+    Apply appropriate exposure scores based on company type (public/private).
+  expected_output: >
+    JSON object with keys: corporate_governance_score, stakeholder_governance_score, governance_assessment (dict with evaluation details).
+  agent: governance_analyst
+
+identify_systemic_idiosyncratic_issues_task:
+  description: >
+    Identify and assess Systemic ESG Issues and Idiosyncratic Issues that may impact the company.
+    Use the Systemic Event Indicator (SEI) for systemic issues and evaluate company-specific events.
+    Assign exposure score adjustments for material issues.
+  expected_output: >
+    JSON object with keys: systemic_issues (list), idiosyncratic_issues (list), exposure_adjustments (dict with score increases).
+  agent: systemic_idiosyncratic_analyst
+
+calculate_exposure_task:
+  description: >
+    Calculate the company's exposure to material ESG risks using the Exposure dimension.
+    Apply Issue Beta to adjust exposure relative to subindustry.
+    Incorporate Beta Indicators and Beta Signals from five thematic areas.
+    Calculate Issue Exposure Scores for each MEI.
+  expected_output: >
+    JSON object with keys: issue_exposure_scores (dict), overall_subindustry_exposure, beta_calculations (dict with beta values and components).
+  agent: exposure_analyst
+
+assess_management_task:
+  description: >
+    Assess how well the company manages its ESG risks using the Management dimension.
+    Determine Issue Manageable Risk Factor (MRF) for each MEI.
+    Evaluate Management Indicators and Event Indicators.
+    Calculate Managed Risk, Management Gap, and Unmanaged Risk for each MEI.
+  expected_output: >
+    JSON object with keys: management_scores (dict), managed_risk (dict), unmanaged_risk (dict), management_gap (dict), mrf_values (dict).
+  agent: management_analyst
+
+calculate_esg_risk_score_task:
+  description: >
+    Calculate the final ESG Risk Rating score and category for the company.
+    Aggregate Issue Unmanaged Risk scores for all MEIs.
+    Assign the company to one of five ESG Risk Categories based on Overall Unmanaged Risk Score.
+  expected_output: >
+    JSON object with keys: overall_unmanaged_risk_score, esg_risk_category, risk_globe_rating (1-5), category_rationale.
+  agent: esg_score_calculator
+
+validate_data_quality_task:
+  description: >
+    Ensure the accuracy, completeness, and timeliness of data used in the ESG Risk Rating calculation.
+    Verify data sources comply with Sustainalytics standards.
+    Perform quality assurance checks and validation.
+  expected_output: >
+    JSON object with keys: data_quality_score, validation_report (dict), data_sources (list), quality_assurance_checks (dict).
+  agent: data_quality_analyst
+
+compile_final_report_task:
+  description: >
+    Compile the findings from all agents into a final ESG Risk Rating report.
+    Synthesize outputs from all agents into a comprehensive report aligned with Sustainalytics' methodology.
+    Structure the report with all required sections.
+  expected_output: >
+    Structured ESG Risk Rating report with sections: company_overview, material_esg_issues, governance_assessment, systemic_idiosyncratic_issues, exposure_dimension, management_dimension, final_esg_rating, data_quality.
+  agent: report_aggregator
