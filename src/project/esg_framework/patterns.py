@@ -8,6 +8,7 @@ from project.esg_framework.heuristics import ALL_DOMAINS, DOMAIN_SCORE_PRIORS
 from project.esg_framework.metrics import (
     Timer,
     accuracy_from_mae,
+    bias_score,
     coverage_metrics,
     deliberation_quality,
     hallucination_rate,
@@ -108,10 +109,12 @@ def _metric_bundle(
     predicted_total = aggregate_total_score(domain_scores)
     actual_total = _ground_truth_weighted_total(report)
     mae_total = mae(predicted_total, actual_total)
+    bias_total = bias_score(predicted_total, actual_total)
     return {
         **coverage,
         "mae_total": mae_total,
         "accuracy": accuracy_from_mae(mae_total),
+        "bias_total": bias_total,
         "predicted_total_avg": round(predicted_total, 4),
         "actual_total_avg": round(actual_total, 4),
         "judge_accuracy": judge_accuracy_stub(domain_scores),
