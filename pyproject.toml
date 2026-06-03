@@ -6,6 +6,7 @@ authors = [{ name = "Anton S. Tsankov", email = "anton.tsankov@utwente.nl" }]
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "crewai[litellm,tools]==1.9.3",
+    "pandas>=2.3.3",
 ]
 
 [project.scripts]
@@ -16,6 +17,8 @@ replay = "project.main:replay"
 test = "project.main:test"
 run_with_trigger = "project.main:run_with_trigger"
 esg_experiments = "project.main:run_esg_experiments"
+esg_experiments_sustainalytics = "project.main:run_esg_experiments_sustainalytics"
+esg_experiments_sustainalytics_hyperparameter_tuning = "project.main:run_esg_experiments_sustainalytics_hyperparameter"
 
 [build-system]
 requires = ["hatchling"]

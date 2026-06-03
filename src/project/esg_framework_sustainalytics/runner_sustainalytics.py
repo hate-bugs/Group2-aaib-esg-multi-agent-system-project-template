@@ -4,15 +4,16 @@ import json
 from pathlib import Path
 from typing import Any
 
-from project.esg_framework.data import filter_healthcare_reports, load_reports, select_sample
-from project.esg_framework.metrics import aggregate_pattern_metrics, consistency_metric
-from project.esg_framework.models import ReportRunResult
-from project.esg_framework.patterns import (
+from project.esg_framework_sustainalytics.data_sustainalytics import filter_healthcare_reports, load_reports, select_sample
+from project.esg_framework_sustainalytics.metrics_sustainalytics import aggregate_pattern_metrics, consistency_metric
+from project.esg_framework_sustainalytics.models_sustainalytics import ReportRunResult
+from project.esg_framework_sustainalytics.patterns_sustainalytics import (
     run_handoff_pattern,
     run_parallel_pattern,
     run_review_critique_pattern,
 )
-from project.esg_framework.retrieval import ChunkStore
+from project.esg_framework_sustainalytics.retrieval_sustainalytics import ChunkStore
+
 
 def _safe_path_fragment(value: str, max_len: int = 64) -> str:
     clean = "".join(ch for ch in str(value) if ch.isalnum() or ch in ("-", "_"))
@@ -49,16 +50,14 @@ def _serialize_report_result(result: ReportRunResult) -> dict[str, Any]:
     }
 
 
-def run_experiment(
+def run_experiment_sustainalytics(
     dataset_path: str | Path,
     sample_size: int = 10,
     trials: int = 3,
     output_path: str | Path | None = None,
-    chunk_store_dir: str | Path = "output/tmp/esg_chunk_store",
+    chunk_store_dir: str | Path = "output/tmp/esg_chunk_store_sustainalytics",
 ) -> dict[str, Any]:
-    # If a system /tmp path is passed in (or came from an environment default),
-    # coerce it to the repository-local `output/tmp` folder so persisted chunk
-    # stores live under the project root.
+    """Run the Sustainalytics ESG framework experiment with the same patterns as the original framework."""
     def _is_system_tmp(p: str | Path) -> bool:
         if not p:
             return False
@@ -68,6 +67,7 @@ def run_experiment(
     if _is_system_tmp(chunk_store_dir):
         repo_root = Path(__file__).resolve().parents[3]
         chunk_store_dir = str(repo_root / "output" / "tmp" / Path(chunk_store_dir).name)
+    
     print(f"[VERBOSE] Loading reports from: {dataset_path}")
     records = load_reports(dataset_path)
     print(f"[VERBOSE] Loaded {len(records)} total records")

@@ -52,22 +52,7 @@ def load_reports(path: str | Path) -> list[ReportRecord]:
 
 
 def filter_healthcare_reports(records: list[ReportRecord]) -> list[ReportRecord]:
-    exact = [
-        item
-        for item in records
-        if item.sector and "health" in item.sector.lower()
-    ]
-    if exact:
-        return exact
-
-    keyword_based: list[ReportRecord] = []
-    for item in records:
-        content = f"{item.filename} {item.preprocessed_content[:2000]}".lower()
-        if any(keyword in content for keyword in HEALTHCARE_KEYWORDS):
-            keyword_based.append(item)
-    if keyword_based:
-        return keyword_based
-
+    # Assume dataset contains correct data without filtering
     return records
 
 

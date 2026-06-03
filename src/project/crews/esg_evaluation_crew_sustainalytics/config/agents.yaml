@@ -18,6 +18,9 @@ material_esg_analyst:
       2. Use data points to estimate the materiality of each risk driver.
       3. Combine individual risk driver assessments to produce an MEI-level quantitative materiality assessment.
     - Output: A list of relevant MEIs with their subindustry exposure scores.
+  tools:
+    - retrieval_trace
+    - score_calculator
   allow_delegation: false
   verbose: true
 
@@ -43,6 +46,9 @@ governance_analyst:
       - For publicly traded companies, assign a lower exposure score (default: 2).
       - For privately owned companies, increase the exposure score to 5 (via Beta adjustment).
     - Output: Exposure scores for Corporate Governance and Stakeholder Governance.
+  tools:
+    - retrieval_trace
+    - score_calculator
   allow_delegation: false
   verbose: true
 
@@ -68,6 +74,9 @@ systemic_idiosyncratic_analyst:
       - If an event reaches Category 4 or 5, it becomes a material issue for the company.
       - Assign an exposure score increase of 6 or 8 points, respectively.
     - Output: List of Systemic and Idiosyncratic Issues with their exposure score adjustments.
+  tools:
+    - retrieval_trace
+    - score_calculator
   allow_delegation: false
   verbose: true
 
@@ -96,6 +105,9 @@ exposure_analyst:
     - Calculate the company's Issue Exposure Score for each MEI: Issue Exposure = Subindustry Exposure * Issue Beta.
     - For the Core Framework, aggregate Beta Signals at the overall level (not per MEI).
     - Output: Company-specific exposure scores for each MEI and the Overall Subindustry Exposure Score.
+  tools:
+    - retrieval_trace
+    - score_calculator
   allow_delegation: false
   verbose: true
 
@@ -126,6 +138,9 @@ management_analyst:
     - Calculate Issue Management Gap: Management Gap = Manageable Risk - Managed Risk.
     - Calculate Issue Unmanaged Risk: Unmanaged Risk = Issue Exposure - Managed Risk (or Unmanageable Risk + Management Gap).
     - Output: Management Scores, Managed Risk, and Unmanaged Risk for each MEI.
+  tools:
+    - retrieval_trace
+    - score_calculator
   allow_delegation: false
   verbose: true
 
@@ -155,6 +170,8 @@ esg_score_calculator:
       - High: 30-39.99 (2 globes)
       - Severe: 40+ (1 globe)
     - Output: Final ESG Risk Rating score and category.
+  tools:
+    - score_calculator
   allow_delegation: false
   verbose: true
 
@@ -180,6 +197,8 @@ data_quality_analyst:
       - Apply validation rules to identify inconsistencies or unexpected outcomes.
       - Ensure quantitative data meets minimum thresholds for completeness.
     - Output: A report on data quality and validation for the ESG Risk Rating.
+  tools:
+    - retrieval_trace
   allow_delegation: false
   verbose: true
 
@@ -211,5 +230,8 @@ report_aggregator:
       7. Final ESG Risk Rating: Overall score and category.
       8. Data Quality: Validation report.
     - Output: A final ESG Risk Rating report in PDF or structured format.
+  tools:
+    - retrieval_trace
+    - score_calculator
   allow_delegation: true
   verbose: true
