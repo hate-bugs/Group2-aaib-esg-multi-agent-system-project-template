@@ -237,6 +237,7 @@ def aggregate_pattern_metrics(results: list[dict[str, Any]]) -> dict[str, Any]:
     for key in summary_keys:
         vals = [row.get(key, 0.0) for row in results]
         out[key] = round(mean(vals), 4)
+    
     return out
 
 

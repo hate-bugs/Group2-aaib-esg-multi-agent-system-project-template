@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
-import re
-from statistics import mean
 import logging
+import re
 import threading
+from statistics import mean
+
+from crewai import CrewOutput
 
 # Module logger
 _logger = logging.getLogger(__name__)
@@ -316,7 +318,7 @@ def _calibrate_domain_score(
     )
 
 
-def _llm_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore | None:
+def _llm_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore:
     tmp_agent = _get_cached_management_agent()
     if tmp_agent is None:
         raise RuntimeError(
@@ -324,26 +326,8 @@ def _llm_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore | None:
         )
 
     prompt = _build_domain_prompt(domain, chunks)
-    agent_response = None
-
-    # Preferred: call the agent's LLM with from_agent to retain agent context
-    try:
-        if hasattr(tmp_agent, "llm") and callable(getattr(tmp_agent.llm, "call", None)):
-            agent_response = tmp_agent.llm.call(prompt, from_agent=tmp_agent)
-            _logger.debug("Invoked management agent via agent.llm.call")
-    except Exception:
-        agent_response = None
-
-    # Fallback: some Crew Agent instances expose a kickoff method for synchronous runs
-    if agent_response is None and callable(getattr(tmp_agent, "kickoff", None)):
-        try:
-            agent_response = tmp_agent.kickoff(prompt)
-            _logger.debug("Invoked management agent via agent.kickoff")
-        except Exception:
-            agent_response = None
-
-    if agent_response is None:
-        raise RuntimeError("Management Crew Agent does not expose a supported invocation method (tried agent.llm.call and agent.kickoff)")
+    agent_response: CrewOutput = tmp_agent.kickoff(prompt)
+    _logger.debug("Invoked management agent via agent.kickoff")
 
     if isinstance(agent_response, dict):
         parsed = agent_response
@@ -375,6 +359,7 @@ def estimate_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore:
     """
     Always uses LLM scoring. Heuristic scoring code is kept for reference but unused.
     Raises RuntimeError if LLM is not configured.
+    Returns the calibrated DomainScore.
     """
     llm_score = _llm_domain_score(domain, chunks)
     if llm_score is None:
@@ -486,19 +471,20 @@ def _call_critique_llm(prompt: str) -> dict | None:
 
     agent_response = None
 
-    # Preferred: use the agent's LLM call to generate critique JSON
-    try:
-        if hasattr(tmp_agent, "llm") and callable(getattr(tmp_agent.llm, "call", None)):
-            agent_response = tmp_agent.llm.call(prompt, from_agent=tmp_agent)
-            _logger.debug("Invoked management agent llm.call for critique")
-    except Exception:
-        agent_response = None
-
-    # Fallback: try agent.kickoff
-    if agent_response is None and callable(getattr(tmp_agent, "kickoff", None)):
+    # Preferred: use kickoff method
+    if callable(getattr(tmp_agent, "kickoff", None)):
         try:
             agent_response = tmp_agent.kickoff(prompt)
             _logger.debug("Invoked management agent kickoff for critique")
+        except Exception:
+            agent_response = None
+
+    # Fallback: use the agent's LLM call to generate critique JSON
+    if agent_response is None:
+        try:
+            if hasattr(tmp_agent, "llm") and callable(getattr(tmp_agent.llm, "call", None)):
+                agent_response = tmp_agent.llm.call(prompt, from_agent=tmp_agent)
+                _logger.debug("Invoked management agent llm.call for critique")
         except Exception:
             agent_response = None
 

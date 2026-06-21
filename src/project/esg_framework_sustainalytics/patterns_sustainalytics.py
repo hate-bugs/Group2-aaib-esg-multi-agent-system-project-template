@@ -157,7 +157,9 @@ def run_parallel_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Repor
         futures = {pool.submit(_score, domain): domain for domain in ALL_DOMAINS}
         domain_scores = {}
         for fut in as_completed(futures):
-            domain_scores[futures[fut]] = fut.result()
+            domain = futures[fut]
+            score = fut.result()
+            domain_scores[domain] = score
     logger.info("Parallel scoring complete for domains: %s", ",".join(domain_scores.keys()))
 
     total_score = aggregate_total_score(domain_scores)
@@ -331,6 +333,7 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
         current = estimate_domain_score(domain, selected)
         current.retrieved_chunk_ids = [chunk.chunk_id for chunk in selected]
         current.used_chunk_ids = [chunk.chunk_id for chunk in selected]
+        
         rounds = 0
         domain_feedback: list[dict] = []
 
@@ -347,6 +350,7 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
             if not critique_chunks:
                 break
             
+            # critique_and_adjust calls the LLM for critique
             revised, stats = critique_and_adjust(domain, current, critique_chunks)
             
             domain_feedback.append({
