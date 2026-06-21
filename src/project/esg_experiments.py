@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 
-from project.esg_framework.runner import run_experiment
+from project.esg_framework_sustainalytics.runner_sustainalytics import run_experiment_sustainalytics as run_experiment
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -217,7 +217,7 @@ Each flow processes **one report per run**:
 - `HandoffHierarchicalESGFlow`
 - `ReviewCritiqueESGFlow`
 
-Implementation modules live under `src/project/esg_framework/` and `src/project/flows/esg_flows.py`.
+Implementation modules live under `src/project/esg_framework_sustainalytics/` and `src/project/flows/esg_flows_sustainalytics.py`.
 
 ### Agent + task definitions
 

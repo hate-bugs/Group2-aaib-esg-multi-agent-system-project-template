@@ -1,7 +1,7 @@
-from project.flows.esg_flows import (
-    HandoffHierarchicalESGFlow,
-    ParallelConcurrentESGFlow,
-    ReviewCritiqueESGFlow,
+from project.flows.esg_flows_sustainalytics import (
+    HandoffHierarchicalESGFlowSustainalytics as HandoffHierarchicalESGFlow,
+    ParallelConcurrentESGFlowSustainalytics as ParallelConcurrentESGFlow,
+    ReviewCritiqueESGFlowSustainalytics as ReviewCritiqueESGFlow,
 )
 
 __all__ = [
