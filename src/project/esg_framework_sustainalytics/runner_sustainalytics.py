@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +75,7 @@ def run_experiment_sustainalytics(
     print(f"[VERBOSE] Loaded {len(records)} total records")
     sample = select_sample(records, sample_size)
     print(f"[VERBOSE] Selected {len(sample)} reports for sampling")
+    
     # Pre-warm Crew Agent on the main thread so worker threads can reuse the cached instance.
     from project.esg_framework_sustainalytics.scoring_sustainalytics import _get_cached_management_agent
 
@@ -86,19 +89,33 @@ def run_experiment_sustainalytics(
     print("[VERBOSE] Pre-warmed management_analyst Crew Agent")
     print(f"[VERBOSE] Patterns to run: {list(PATTERN_FUNCTIONS.keys())}")
     print(f"[VERBOSE] Trials per pattern: {max(1, trials)}")
+    
+    # Always use thread-level parallelism for report processing
+    num_report_workers = min(len(sample), int(os.getenv("ESG_REPORT_WORKERS", "4")))
+    print(f"[PARALLEL] Using {num_report_workers} threads for report-level parallelism")
 
     chunk_store = ChunkStore()
     all_results: dict[str, list[dict[str, Any]]] = {pattern: [] for pattern in PATTERN_FUNCTIONS}
     detailed: dict[str, list[dict[str, Any]]] = {pattern: [] for pattern in PATTERN_FUNCTIONS}
 
-    for i, record in enumerate(sample):
-        print(f"[VERBOSE] Processing report {i+1}/{len(sample)}: {record.report_id}")
-        for pattern_name, fn in PATTERN_FUNCTIONS.items():
+    def _process_report(record, pattern_functions, chunk_store_ref, chunk_store_dir_ref, trials_count, report_index, total_reports):
+        """Process a single report through all patterns."""
+        from project.esg_framework_sustainalytics.retrieval_sustainalytics import ChunkStore
+        
+        # Create a local chunk store for this report to avoid thread conflicts
+        local_chunk_store = ChunkStore()
+        
+        print(f"[VERBOSE] Processing report {report_index+1}/{total_reports}: {record.report_id}")
+        
+        report_pattern_results = {}
+        report_pattern_detailed = {}
+        
+        for pattern_name, fn in pattern_functions.items():
             print(f"[VERBOSE]  Running pattern: {pattern_name}")
             trials_results: list[ReportRunResult] = []
-            for trial in range(max(1, trials)):
-                print(f"[VERBOSE]    Trial {trial+1}/{max(1, trials)}")
-                result = fn(record, chunk_store)
+            for trial in range(max(1, trials_count)):
+                print(f"[VERBOSE]    Trial {trial+1}/{max(1, trials_count)}")
+                result = fn(record, local_chunk_store)
                 trials_results.append(result)
 
             consistency = consistency_metric([result.domain_scores for result in trials_results])
@@ -108,14 +125,50 @@ def run_experiment_sustainalytics(
                 "Stable" if consistency >= 0.85 else "Moderate variance" if consistency >= 0.7 else "High variance"
             )
 
-            all_results[pattern_name].append(representative.metrics)
-            detailed[pattern_name].append(_serialize_report_result(representative))
+            report_pattern_results[pattern_name] = representative.metrics
+            report_pattern_detailed[pattern_name] = _serialize_report_result(representative)
             print(f"[VERBOSE]    Pattern {pattern_name} completed for report {record.report_id}")
 
             safe_id = _safe_path_fragment(record.report_id)
-            chunk_file = Path(chunk_store_dir) / f"report_{safe_id}_{pattern_name}.json"
-            chunk_store.persist_json(record.report_id, chunk_file)
+            chunk_file = Path(chunk_store_dir_ref) / f"report_{safe_id}_{pattern_name}.json"
+            local_chunk_store.persist_json(record.report_id, chunk_file)
             print(f"[VERBOSE]    Chunk store saved to: {chunk_file}")
+        
+        return report_pattern_results, report_pattern_detailed
+
+    if num_report_workers > 1:
+        # Use thread pool for parallel report processing
+        with ThreadPoolExecutor(max_workers=num_report_workers) as executor:
+            futures = {
+                executor.submit(
+                    _process_report,
+                    record,
+                    PATTERN_FUNCTIONS,
+                    chunk_store,
+                    chunk_store_dir,
+                    trials,
+                    i,
+                    len(sample)
+                ): i for i, record in enumerate(sample)
+            }
+            
+            for future in as_completed(futures):
+                i = futures[future]
+                pattern_results, pattern_detailed = future.result()
+                
+                # Aggregate results from this report
+                for pattern_name in PATTERN_FUNCTIONS:
+                    all_results[pattern_name].append(pattern_results[pattern_name])
+                    detailed[pattern_name].append(pattern_detailed[pattern_name])
+    else:
+        # Fallback to sequential processing if only 1 worker
+        for i, record in enumerate(sample):
+            pattern_results, pattern_detailed = _process_report(
+                record, PATTERN_FUNCTIONS, chunk_store, chunk_store_dir, trials, i, len(sample)
+            )
+            for pattern_name in PATTERN_FUNCTIONS:
+                all_results[pattern_name].append(pattern_results[pattern_name])
+                detailed[pattern_name].append(pattern_detailed[pattern_name])
 
     print(f"[VERBOSE] Aggregating metrics for all patterns...")
     summary = {pattern: aggregate_pattern_metrics(metrics) for pattern, metrics in all_results.items()}

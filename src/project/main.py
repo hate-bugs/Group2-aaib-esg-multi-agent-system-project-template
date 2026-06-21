@@ -2,7 +2,7 @@
 import os
 import sys
 import warnings
-
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 
 from project.esg_experiments import main as run_esg_cli
@@ -35,9 +35,50 @@ def run_esg_experiments_sustainalytics():
         raise Exception(f"An error occurred while running ESG Sustainalytics experiments: {e}")
 
 
+def _run_single_hyperparameter_config(config, base_args):
+    """
+    Run a single hyperparameter configuration.
+    This is a helper function designed to be called from a process pool.
+    """
+    # Store original env vars for this process
+    original_env = {}
+    for key in config["env"].keys():
+        original_env[key] = os.environ.get(key)
+
+    try:
+        print(f"\n{'='*60}")
+        print(f"Running Sustainalytics experiment with configuration: {config['name']}")
+        print(f"{'='*60}")
+
+        # Apply hyperparameters
+        for key, value in config["env"].items():
+            os.environ[key] = value
+
+        # Generate unique output path for this configuration
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = f"output/esg_experiment_sustainalytics_{config['name']}_{timestamp}.json"
+        chunk_store = f"output/tmp/esg_chunk_store_sustainalytics_{config['name']}_{timestamp}"
+
+        args = base_args + ["--output", output_path, "--chunk-store-dir", chunk_store]
+        run_esg_cli_sustainalytics(args)
+        
+        print(f"\n{'='*60}")
+        print(f"Completed configuration: {config['name']}")
+        print(f"{'='*60}")
+        
+    finally:
+        # Restore original environment for this process
+        for key, value in original_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 def run_esg_experiments_sustainalytics_hyperparameter():
     """
     Run ESG Sustainalytics experiments with n=30, 2 trials, and multiple hyperparameter configurations.
+    Uses multiprocessing for config-level parallelism and threading for report-level parallelism.
     """
     # Base configuration
     base_args = [
@@ -109,38 +150,28 @@ def run_esg_experiments_sustainalytics_hyperparameter():
         },
     ]
 
-    # Store original environment values
-    original_env = {}
-    env_keys = set()
-    for config in configs:
-        env_keys.update(config["env"].keys())
-    for key in env_keys:
-        original_env[key] = os.environ.get(key)
+    # Determine number of workers for process pool
+    num_processes = min(len(configs), os.cpu_count() or 4)
+    print(f"\n[PARALLEL] Using {num_processes} processes for {len(configs)} configurations")
+    print(f"[PARALLEL] Each process will use thread-level parallelism for reports")
 
     try:
-        for config in configs:
-            print(f"\n{'='*60}")
-            print(f"Running Sustainalytics experiment with configuration: {config['name']}")
-            print(f"{'='*60}")
-
-            # Apply hyperparameters
-            for key, value in config["env"].items():
-                os.environ[key] = value
-
-            # Generate unique output path for this configuration
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_path = f"output/esg_experiment_sustainalytics_{config['name']}_{timestamp}.json"
-            chunk_store = f"output/tmp/esg_chunk_store_sustainalytics_{config['name']}_{timestamp}"
-
-            args = base_args + ["--output", output_path, "--chunk-store-dir", chunk_store]
-            run_esg_cli_sustainalytics(args)
+        # Use ProcessPoolExecutor for config-level parallelism
+        with ProcessPoolExecutor(max_workers=num_processes) as executor:
+            # Submit all config tasks
+            futures = {
+                executor.submit(_run_single_hyperparameter_config, config, base_args): config["name"]
+                for config in configs
+            }
+            
+            # Wait for all to complete
+            for future in as_completed(futures):
+                config_name = futures[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"[ERROR] Configuration '{config_name}' failed: {e}")
+                    raise
 
     except Exception as e:
         raise Exception(f"An error occurred while running ESG Sustainalytics hyperparameter experiments: {e}")
-    finally:
-        # Restore original environment
-        for key, value in original_env.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
