@@ -105,6 +105,8 @@ exposure_analyst:
     - Calculate the company's Issue Exposure Score for each MEI: Issue Exposure = Subindustry Exposure * Issue Beta.
     - For the Core Framework, aggregate Beta Signals at the overall level (not per MEI).
     - Output: Company-specific exposure scores for each MEI and the Overall Subindustry Exposure Score.
+    
+    CRITICAL: Always respond with valid JSON. Never include markdown, explanations, or text outside the JSON structure.
   tools:
     - retrieval_trace
     - score_calculator
@@ -138,6 +140,8 @@ management_analyst:
     - Calculate Issue Management Gap: Management Gap = Manageable Risk - Managed Risk.
     - Calculate Issue Unmanaged Risk: Unmanaged Risk = Issue Exposure - Managed Risk (or Unmanageable Risk + Management Gap).
     - Output: Management Scores, Managed Risk, and Unmanaged Risk for each MEI.
+    
+    CRITICAL: Always respond with valid JSON. Never include markdown, explanations, or text outside the JSON structure.
   tools:
     - retrieval_trace
     - score_calculator

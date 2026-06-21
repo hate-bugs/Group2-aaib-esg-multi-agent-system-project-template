@@ -6,7 +6,7 @@ import re
 import threading
 from statistics import mean
 
-from crewai import CrewOutput
+from crewai.lite_agent_output import LiteAgentOutput
 
 # Module logger
 _logger = logging.getLogger(__name__)
@@ -215,6 +215,7 @@ def _build_domain_prompt(domain: str, chunks: list[Chunk]) -> str:
 
     return (
         "You are an ESG scoring assistant aligned with Morningstar Sustainalytics' ESG Risk Ratings methodology.\n"
+        "CRITICAL: You MUST respond with ONLY a valid JSON object. No other text, no markdown, no explanations.\n"
         f"Domain: {domain}\n"
         "Estimate a Management Indicator score from 0 to 100 using ONLY the evidence chunks.\n"
         "Use only preprocessed_content evidence. Do not assume facts that are not explicitly stated.\n"
@@ -232,8 +233,8 @@ def _build_domain_prompt(domain: str, chunks: list[Chunk]) -> str:
         "4) Use > 80 only for exceptional, comprehensive, and quantified evidence across strategy, governance, and risk management.\n"
         "5) For Geographic domain: Score reflects location-specific ESG risks and regional exposure assessments.\n"
         "6) For Governance: Default exposure scores are 70 for Corporate Governance (public) and 20 for Stakeholder Governance (public). Adjust based on evidence.\n"
-        "Return strict JSON with keys: estimated_score (number), confidence (number 0..1), rationale (string).\n"
-        "Do not include markdown.\n\n"
+        "RESPONSE FORMAT: Return ONLY a strict JSON object with these exact keys: "
+        "{'estimated_score': <number 0-100>, 'confidence': <number 0-1>, 'rationale': '<string>'}\n"
         f"Evidence:\n{evidence_block}"
     )
 
@@ -326,21 +327,35 @@ def _llm_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore:
         )
 
     prompt = _build_domain_prompt(domain, chunks)
-    agent_response: CrewOutput = tmp_agent.kickoff(prompt)
+    agent_response: LiteAgentOutput = tmp_agent.kickoff(prompt)
     _logger.debug("Invoked management agent via agent.kickoff")
 
-    if isinstance(agent_response, dict):
-        parsed = agent_response
+    # Extract response from LiteAgentOutput
+    # 1. Try pydantic model dump first
+    if agent_response.pydantic:
+        parsed = agent_response.pydantic.model_dump()
+    # 2. Try extracting JSON from raw output
+    elif agent_response.raw:
+        parsed = _extract_first_json_dict(agent_response.raw)
+        if parsed is None:
+            _logger.error("Raw agent response (first 2000 chars): %s", agent_response.raw[:2000])
+            _logger.warning("LLM returned non-JSON text for domain %s, falling back to heuristic scoring", domain)
+            # Fall back to heuristic scoring instead of crashing
+            return _heuristic_domain_score(domain, chunks)
     else:
-        parsed = _extract_first_json_dict(str(agent_response))
+        _logger.warning("Empty response from management_analyst Agent for domain %s, falling back to heuristic", domain)
+        return _heuristic_domain_score(domain, chunks)
+    
     if not isinstance(parsed, dict):
-        raise RuntimeError("Invalid response from management_analyst Agent: expected JSON-like dict")
+        _logger.warning("Invalid response type from management_analyst Agent for domain %s, falling back to heuristic", domain)
+        return _heuristic_domain_score(domain, chunks)
 
     try:
         estimated_score = max(0.0, min(MAX_SCORE, float(parsed.get("estimated_score", 0.0))))
         confidence = max(0.0, min(1.0, float(parsed.get("confidence", BASE_CONFIDENCE))))
     except (TypeError, ValueError):
-        raise RuntimeError("Invalid numeric fields in management_analyst Agent response")
+        _logger.warning("Invalid numeric fields in management_analyst Agent response for domain %s, falling back to heuristic", domain)
+        return _heuristic_domain_score(domain, chunks)
 
     rationale = str(parsed.get("rationale", "")).strip()
     if not rationale:
@@ -357,7 +372,7 @@ def _llm_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore:
 
 def estimate_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore:
     """
-    Always uses LLM scoring. Heuristic scoring code is kept for reference but unused.
+    Uses LLM scoring with fallback to heuristic scoring if LLM returns invalid JSON.
     Raises RuntimeError if LLM is not configured.
     Returns the calibrated DomainScore.
     """
@@ -431,14 +446,14 @@ def _build_critique_prompt(
         "2) Keep score <= 40 if evidence is generic or lacks measurable targets/results (aligns with low management scores).\n"
         "3) Keep score <= 60 unless evidence shows clear governance ownership plus risk methods and monitoring outcomes.\n"
         "4) Use > 80 only for exceptional, comprehensive, and quantified evidence across all MEI domains.\n\n"
-        "Return strict JSON with these keys:\n"
+        "CRITICAL: Return ONLY a valid JSON object with these exact keys:\n"
         "- feedback (string): Your critique of the candidate's rationale (2-3 sentences)\n"
         "- missing_evidence (list of strings): Specific gaps or missing criteria\n"
         "- overstated_claims (list of strings): Claims not supported by evidence\n"
         "- recommended_score (number): Your suggested Management Indicator score (0-100) based on ALL evidence\n"
         "- confidence (number 0-1): Your confidence in the recommended score\n"
         "- adjustment_direction (string): 'increase', 'decrease', or 'no_change'\n"
-        "Do not include markdown.\n\n"
+        "Do not include any other text or markdown.\n\n"
         f"Additional evidence chunks:\n{evidence_block}"
     )
 
@@ -491,11 +506,28 @@ def _call_critique_llm(prompt: str) -> dict | None:
     if agent_response is None:
         raise RuntimeError("Management Crew Agent does not expose a supported invocation method for critique (tried agent.llm.call and agent.kickoff)")
 
-    if isinstance(agent_response, dict):
-        return agent_response
-    parsed = _extract_critique_response(str(agent_response))
+    # Handle LiteAgentOutput from kickoff or raw string from llm.call
+    if hasattr(agent_response, 'pydantic'):
+        # It's a LiteAgentOutput object
+        if agent_response.pydantic:
+            parsed = agent_response.pydantic.model_dump()
+        elif agent_response.raw:
+            parsed = _extract_critique_response(agent_response.raw)
+            if parsed is None:
+                _logger.error("Raw critique response (first 2000 chars): %s", agent_response.raw[:2000])
+                _logger.warning("LLM returned non-JSON text for critique, returning None to skip critique")
+                return None
+        else:
+            _logger.warning("Empty critique response from management_analyst Agent, returning None to skip critique")
+            return None
+    elif isinstance(agent_response, dict):
+        parsed = agent_response
+    else:
+        parsed = _extract_critique_response(str(agent_response))
+    
     if not isinstance(parsed, dict):
-        raise RuntimeError("Invalid response from management_analyst Agent for critique: expected JSON-like dict")
+        _logger.warning("Invalid response type from management_analyst Agent for critique, returning None to skip critique")
+        return None
     return parsed
 
 
@@ -513,9 +545,8 @@ def critique_and_adjust(domain: str, candidate: DomainScore, critique_chunks: li
 
     critique_response = _call_critique_llm(prompt)
     if critique_response is None:
-        raise RuntimeError(
-            "management_analyst Crew Agent did not return a critique response; ensure the agent is configured and available"
-        )
+        _logger.warning("Critique LLM returned None for domain %s, skipping critique adjustment", domain)
+        return candidate, {"adjusted": False, "gap": 0.0, "feedback": "Critique LLM failed to return valid JSON"}
 
     feedback = critique_response.get("feedback", "")
     missing = critique_response.get("missing_evidence", [])
