@@ -3,6 +3,11 @@ from __future__ import annotations
 import json
 import re
 from statistics import mean
+import logging
+import threading
+
+# Module logger
+_logger = logging.getLogger(__name__)
 
 MAX_SCORE = 100.0
 BASE_CONFIDENCE = 0.35
@@ -20,6 +25,51 @@ from project.esg_framework_sustainalytics.heuristics_sustainalytics import (
     SCORING_RUBRIC,
 )
 from project.esg_framework_sustainalytics.models_sustainalytics import Chunk, DomainScore
+
+
+# Cached temporary Crew Agent to avoid reconstructing per call (best-effort)
+_CACHED_CREW_AGENT: object | None = None
+
+
+def _get_cached_management_agent():
+    """Return a cached management_agent Crew Agent instance or None if unavailable."""
+    global _CACHED_CREW_AGENT
+    if _CACHED_CREW_AGENT is not None:
+        return _CACHED_CREW_AGENT
+    # Avoid initializing CrewAI telemetry / signal handlers from background threads.
+    if threading.current_thread() is not threading.main_thread():
+        _logger.info(
+            "Not initializing Crew Agent from non-main thread (%s); expecting a pre-warmed cached agent",
+            threading.current_thread().name,
+        )
+        return None
+
+    try:
+        from pathlib import Path
+        import yaml
+        from crewai import Agent as CrewAgent  # type: ignore
+        from project.tools import CalculatorTool, RetrievalTraceTool
+        from project.llm_config import llm
+
+        agents_path = (
+            Path(__file__).resolve().parents[1]
+            / "crews"
+            / "esg_evaluation_crew_sustainalytics"
+            / "config"
+            / "agents.yaml"
+        )
+        with open(agents_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+        agent_cfg = cfg.get("management_analyst")
+        if not agent_cfg:
+            return None
+        _CACHED_CREW_AGENT = CrewAgent(config=agent_cfg, tools=[RetrievalTraceTool(), CalculatorTool()], llm=llm, verbose=False)
+        return _CACHED_CREW_AGENT
+    except Exception as exc:
+        _logger.warning("Failed to initialize cached management Crew Agent: %s", exc)
+        return None
+
+
 
 
 def score_label(score: float) -> str:
@@ -267,40 +317,52 @@ def _calibrate_domain_score(
 
 
 def _llm_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore | None:
-    try:
-        from project.llm_config import llm
-    except Exception:
-        return None
+    tmp_agent = _get_cached_management_agent()
+    if tmp_agent is None:
+        raise RuntimeError(
+            "Crew management_analyst Agent not initialized. Ensure the runner pre-warms the Crew Agent on the main thread before running pattern workers."
+        )
 
     prompt = _build_domain_prompt(domain, chunks)
-    response = None
-    for method_name in ("call", "invoke", "predict"):
-        method = getattr(llm, method_name, None)
-        if callable(method):
-            try:
-                response = method(prompt)
-                break
-            except Exception:
-                continue
-    if response is None:
-        return None
+    agent_response = None
 
-    if isinstance(response, dict):
-        parsed = response
+    # Preferred: call the agent's LLM with from_agent to retain agent context
+    try:
+        if hasattr(tmp_agent, "llm") and callable(getattr(tmp_agent.llm, "call", None)):
+            agent_response = tmp_agent.llm.call(prompt, from_agent=tmp_agent)
+            _logger.debug("Invoked management agent via agent.llm.call")
+    except Exception:
+        agent_response = None
+
+    # Fallback: some Crew Agent instances expose a kickoff method for synchronous runs
+    if agent_response is None and callable(getattr(tmp_agent, "kickoff", None)):
+        try:
+            agent_response = tmp_agent.kickoff(prompt)
+            _logger.debug("Invoked management agent via agent.kickoff")
+        except Exception:
+            agent_response = None
+
+    if agent_response is None:
+        raise RuntimeError("Management Crew Agent does not expose a supported invocation method (tried agent.llm.call and agent.kickoff)")
+
+    if isinstance(agent_response, dict):
+        parsed = agent_response
     else:
-        parsed = _extract_first_json_dict(str(response))
+        parsed = _extract_first_json_dict(str(agent_response))
     if not isinstance(parsed, dict):
-        return None
+        raise RuntimeError("Invalid response from management_analyst Agent: expected JSON-like dict")
 
     try:
         estimated_score = max(0.0, min(MAX_SCORE, float(parsed.get("estimated_score", 0.0))))
         confidence = max(0.0, min(1.0, float(parsed.get("confidence", BASE_CONFIDENCE))))
     except (TypeError, ValueError):
-        return None
+        raise RuntimeError("Invalid numeric fields in management_analyst Agent response")
+
     rationale = str(parsed.get("rationale", "")).strip()
     if not rationale:
-        rationale = f"LLM estimated {domain} Management Indicator score from retrieved evidence chunks."
+        rationale = f"Crew Agent estimated {domain} Management Indicator score from retrieved evidence chunks."
 
+    _logger.info("Used Crew Agent response for domain %s", domain)
     return DomainScore(
         estimated_score=round(estimated_score, 2),
         confidence=round(confidence, 3),
@@ -414,29 +476,40 @@ def _extract_critique_response(raw_text: str) -> dict | None:
 
 
 def _call_critique_llm(prompt: str) -> dict | None:
+    # Crew-only critique path: require a pre-warmed management_analyst Agent and
+    # use it to generate critique JSON. No direct LLM fallback is allowed.
+    tmp_agent = _get_cached_management_agent()
+    if tmp_agent is None:
+        raise RuntimeError(
+            "Crew management_analyst Agent not initialized for critique. Ensure the runner pre-warms the Crew Agent on the main thread."
+        )
+
+    agent_response = None
+
+    # Preferred: use the agent's LLM call to generate critique JSON
     try:
-        from project.llm_config import llm
+        if hasattr(tmp_agent, "llm") and callable(getattr(tmp_agent.llm, "call", None)):
+            agent_response = tmp_agent.llm.call(prompt, from_agent=tmp_agent)
+            _logger.debug("Invoked management agent llm.call for critique")
     except Exception:
-        return None
+        agent_response = None
 
-    response = None
-    for method_name in ("call", "invoke", "predict"):
-        method = getattr(llm, method_name, None)
-        if callable(method):
-            try:
-                response = method(prompt)
-                break
-            except Exception:
-                continue
-    if response is None:
-        return None
+    # Fallback: try agent.kickoff
+    if agent_response is None and callable(getattr(tmp_agent, "kickoff", None)):
+        try:
+            agent_response = tmp_agent.kickoff(prompt)
+            _logger.debug("Invoked management agent kickoff for critique")
+        except Exception:
+            agent_response = None
 
-    if isinstance(response, dict):
-        parsed = response
-    else:
-        parsed = _extract_critique_response(str(response))
+    if agent_response is None:
+        raise RuntimeError("Management Crew Agent does not expose a supported invocation method for critique (tried agent.llm.call and agent.kickoff)")
+
+    if isinstance(agent_response, dict):
+        return agent_response
+    parsed = _extract_critique_response(str(agent_response))
     if not isinstance(parsed, dict):
-        return None
+        raise RuntimeError("Invalid response from management_analyst Agent for critique: expected JSON-like dict")
     return parsed
 
 
@@ -453,29 +526,10 @@ def critique_and_adjust(domain: str, candidate: DomainScore, critique_chunks: li
     )
 
     critique_response = _call_critique_llm(prompt)
-    
     if critique_response is None:
-        critique = estimate_domain_score(domain, critique_chunks)
-        gap = abs(candidate.estimated_score - critique.estimated_score)
-        # Scaled threshold: 1.5 -> 7.5 for 0-100 scale
-        needs_adjustment = gap > 7.5
-        if not needs_adjustment:
-            return candidate, {"adjusted": False, "gap": round(gap, 2), "feedback": "LLM unavailable, no adjustment"}
-
-        merged_score = round((candidate.estimated_score + critique.estimated_score) / 2.0, 2)
-        merged_conf = round(max(candidate.confidence, critique.confidence), 3)
-        updated = DomainScore(
-            estimated_score=merged_score,
-            confidence=merged_conf,
-            rationale=(
-                f"[FALLBACK] Detected gap={gap:.2f}. Initial: {candidate.rationale} | "
-                f"Critique: {critique.rationale}"
-            ),
-            label=score_label(merged_score),
-            retrieved_chunk_ids=list(dict.fromkeys(candidate.retrieved_chunk_ids + critique.retrieved_chunk_ids)),
-            used_chunk_ids=list(dict.fromkeys(candidate.used_chunk_ids + critique.used_chunk_ids)),
+        raise RuntimeError(
+            "management_analyst Crew Agent did not return a critique response; ensure the agent is configured and available"
         )
-        return updated, {"adjusted": True, "gap": round(gap, 2), "feedback": "Fallback re-scoring applied"}
 
     feedback = critique_response.get("feedback", "")
     missing = critique_response.get("missing_evidence", [])

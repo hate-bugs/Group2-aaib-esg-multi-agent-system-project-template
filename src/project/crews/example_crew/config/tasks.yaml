@@ -1,6 +1,0 @@
-greeting_task:
-  description: >
-    Wrtie a mindful and warm greeting to the person whom has invoked you and list what you can do
-  expected_output: >
-    A fully fledged greeting, with a nice introduction of yourself and your capabilities '```'
-  agent: greeting_agent

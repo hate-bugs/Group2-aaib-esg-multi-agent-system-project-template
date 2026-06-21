@@ -73,6 +73,17 @@ def run_experiment_sustainalytics(
     print(f"[VERBOSE] Loaded {len(records)} total records")
     sample = select_sample(records, sample_size)
     print(f"[VERBOSE] Selected {len(sample)} reports for sampling")
+    # Pre-warm Crew Agent on the main thread so worker threads can reuse the cached instance.
+    from project.esg_framework_sustainalytics.scoring_sustainalytics import _get_cached_management_agent
+
+    cached_agent = _get_cached_management_agent()
+    if cached_agent is None:
+        raise RuntimeError(
+            "Failed to pre-warm Crew management_analyst Agent on main thread. "
+            "Verify Crew config at src/project/crews/esg_evaluation_crew_sustainalytics/config/agents.yaml "
+            "and LLM credentials in project.llm_config."
+        )
+    print("[VERBOSE] Pre-warmed management_analyst Crew Agent")
     print(f"[VERBOSE] Patterns to run: {list(PATTERN_FUNCTIONS.keys())}")
     print(f"[VERBOSE] Trials per pattern: {max(1, trials)}")
 
