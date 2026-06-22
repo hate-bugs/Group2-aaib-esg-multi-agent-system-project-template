@@ -207,9 +207,12 @@ def latency_efficiency(
     total_latency = sum(durations.values())
     scoring_paths = [value for key, value in durations.items() if key.startswith("score_")]
     critical_path = max(scoring_paths) if scoring_paths else total_latency
+    # Use "overall" timer if present (actual wall-clock time), otherwise fall back to sum
+    wall_clock = durations.get("overall", total_latency)
     return {
-        "latency_total": round(total_latency, 6),
+        "latency_total": round(wall_clock, 6),
         "latency_critical_path": round(critical_path, 6),
+        "latency_sum_durations": round(total_latency, 6),  # Keep sum for reference
         "coverage_per_call": round(coverage / max(1, total_agent_calls), 6),
         "token_efficiency": round(coverage / max(1, total_tokens), 8),
     }

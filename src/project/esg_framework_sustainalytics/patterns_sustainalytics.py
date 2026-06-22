@@ -125,6 +125,7 @@ def _metric_bundle(
 def run_parallel_pattern(report: ReportRecord, chunk_store: ChunkStore) -> ReportRunResult:
     """Run the parallel/concurrent pattern for Sustainalytics framework."""
     timer = Timer()
+    timer.start("overall")
     timer.start("parse_report")
     chunks = split_report_to_chunks(report)
     chunk_store.put(report.report_id, chunks)
@@ -164,6 +165,7 @@ def run_parallel_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Repor
 
     total_score = aggregate_total_score(domain_scores)
     comparison = _compare_to_ground_truth(total_score, report)
+    timer.stop("overall")
     metrics = _metric_bundle(
         report,
         domain_scores,
@@ -189,6 +191,7 @@ def run_parallel_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Repor
 def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> ReportRunResult:
     """Run the handoff/hierarchical pattern for Sustainalytics framework."""
     timer = Timer()
+    timer.start("overall")
     timer.start("parse_report")
     chunks = split_report_to_chunks(report)
     chunk_store.put(report.report_id, chunks)
@@ -290,6 +293,7 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
 
     total_score = aggregate_total_score(domain_scores)
     comparison = _compare_to_ground_truth(total_score, report)
+    timer.stop("overall")
     metrics = _metric_bundle(
         report,
         domain_scores,
@@ -315,6 +319,7 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
 def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, max_rounds: int = REVIEW_MAX_ROUNDS) -> ReportRunResult:
     """Run the review & critique pattern for Sustainalytics framework."""
     timer = Timer()
+    timer.start("overall")
     timer.start("parse_report")
     chunks = split_report_to_chunks(report)
     chunk_store.put(report.report_id, chunks)
@@ -339,13 +344,11 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
 
         while rounds < max_rounds:
             rounds += 1
-            already_used = set(current.used_chunk_ids)
             critique_chunks = retrieve_for_domain(
                 chunks,
                 domain,
                 max_chunks=REVIEW_CRITIQUE_CHUNKS,
-                exclude_chunk_ids=already_used,
-                min_score=0.8,
+                min_score=0.0,
             )
             if not critique_chunks:
                 break
@@ -394,6 +397,7 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
 
     total_score = aggregate_total_score(domain_scores)
     comparison = _compare_to_ground_truth(total_score, report)
+    timer.stop("overall")
     metrics = _metric_bundle(
         report,
         domain_scores,
