@@ -76,17 +76,21 @@ def run_experiment_sustainalytics(
     sample = select_sample(records, sample_size)
     print(f"[VERBOSE] Selected {len(sample)} reports for sampling")
     
-    # Pre-warm Crew Agent on the main thread so worker threads can reuse the cached instance.
-    from project.esg_framework_sustainalytics.scoring_sustainalytics import _get_cached_management_agent
+    # Pre-warm all Crew Agents on the main thread so worker threads can reuse the cached instances.
+    from project.esg_framework_sustainalytics.scoring_sustainalytics import _get_cached_agent
 
-    cached_agent = _get_cached_management_agent()
-    if cached_agent is None:
-        raise RuntimeError(
-            "Failed to pre-warm Crew management_analyst Agent on main thread. "
-            "Verify Crew config at src/project/crews/esg_evaluation_crew_sustainalytics/config/agents.yaml "
-            "and LLM credentials in project.llm_config."
-        )
-    print("[VERBOSE] Pre-warmed management_analyst Crew Agent")
+    core_agents = ["material_esg_analyst", "governance_analyst", "systemic_idiosyncratic_analyst", 
+                   "exposure_analyst", "management_analyst"]
+    
+    for agent_name in core_agents:
+        cached_agent = _get_cached_agent(agent_name)
+        if cached_agent is None:
+            raise RuntimeError(
+                f"Failed to pre-warm Crew {agent_name} Agent on main thread. "
+                "Verify Crew config at src/project/crews/esg_evaluation_crew_sustainalytics/config/agents.yaml "
+                "and LLM credentials in project.llm_config."
+            )
+        print(f"[VERBOSE] Pre-warmed {agent_name} Crew Agent")
     print(f"[VERBOSE] Patterns to run: {list(PATTERN_FUNCTIONS.keys())}")
     print(f"[VERBOSE] Trials per pattern: {max(1, trials)}")
     

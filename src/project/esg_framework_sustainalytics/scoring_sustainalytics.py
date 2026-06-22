@@ -29,15 +29,30 @@ from project.esg_framework_sustainalytics.heuristics_sustainalytics import (
 from project.esg_framework_sustainalytics.models_sustainalytics import Chunk, DomainScore
 
 
-# Cached temporary Crew Agent to avoid reconstructing per call (best-effort)
-_CACHED_CREW_AGENT: object | None = None
+# Cached Crew Agents to avoid reconstructing per call (best-effort)
+_CACHED_MATERIAL_ESG_AGENT: object | None = None
+_CACHED_GOVERNANCE_AGENT: object | None = None
+_CACHED_SYSTEMIC_IDIOSYNCRATIC_AGENT: object | None = None
+_CACHED_EXPOSURE_AGENT: object | None = None
+_CACHED_MANAGEMENT_AGENT: object | None = None
 
 
-def _get_cached_management_agent():
-    """Return a cached management_agent Crew Agent instance or None if unavailable."""
-    global _CACHED_CREW_AGENT
-    if _CACHED_CREW_AGENT is not None:
-        return _CACHED_CREW_AGENT
+def _get_cached_agent(agent_name: str):
+    """Return a cached Crew Agent instance by name, or None if unavailable."""
+    global _CACHED_MATERIAL_ESG_AGENT, _CACHED_GOVERNANCE_AGENT, _CACHED_SYSTEMIC_IDIOSYNCRATIC_AGENT
+    global _CACHED_EXPOSURE_AGENT, _CACHED_MANAGEMENT_AGENT
+    
+    # Check if already cached
+    cached_map = {
+        "material_esg_analyst": _CACHED_MATERIAL_ESG_AGENT,
+        "governance_analyst": _CACHED_GOVERNANCE_AGENT,
+        "systemic_idiosyncratic_analyst": _CACHED_SYSTEMIC_IDIOSYNCRATIC_AGENT,
+        "exposure_analyst": _CACHED_EXPOSURE_AGENT,
+        "management_analyst": _CACHED_MANAGEMENT_AGENT,
+    }
+    if cached_map.get(agent_name) is not None:
+        return cached_map[agent_name]
+    
     # Avoid initializing CrewAI telemetry / signal handlers from background threads.
     if threading.current_thread() is not threading.main_thread():
         _logger.info(
@@ -62,14 +77,62 @@ def _get_cached_management_agent():
         )
         with open(agents_path, "r", encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
-        agent_cfg = cfg.get("management_analyst")
+        
+        agent_cfg = cfg.get(agent_name)
         if not agent_cfg:
+            _logger.warning(f"Agent config not found for {agent_name}")
             return None
-        _CACHED_CREW_AGENT = CrewAgent(config=agent_cfg, tools=[RetrievalTraceTool(), CalculatorTool()], llm=llm, verbose=False)
-        return _CACHED_CREW_AGENT
+            
+        # All agents use both tools
+        tools = [RetrievalTraceTool(), CalculatorTool()]
+        agent = CrewAgent(config=agent_cfg, tools=tools, llm=llm, verbose=False)
+        
+        # Cache the agent
+        if agent_name == "material_esg_analyst":
+            _CACHED_MATERIAL_ESG_AGENT = agent
+        elif agent_name == "governance_analyst":
+            _CACHED_GOVERNANCE_AGENT = agent
+        elif agent_name == "systemic_idiosyncratic_analyst":
+            _CACHED_SYSTEMIC_IDIOSYNCRATIC_AGENT = agent
+        elif agent_name == "exposure_analyst":
+            _CACHED_EXPOSURE_AGENT = agent
+        elif agent_name == "management_analyst":
+            _CACHED_MANAGEMENT_AGENT = agent
+            
+        return agent
     except Exception as exc:
-        _logger.warning("Failed to initialize cached management Crew Agent: %s", exc)
+        _logger.warning(f"Failed to initialize cached {agent_name} Crew Agent: %s", exc)
         return None
+
+
+def _get_agent_for_domain(domain: str):
+    """
+    Map domain to the appropriate agent based on Sustainalytics building blocks.
+    
+    Building blocks:
+    - Material ESG Issues (MEIs): product_production, financials, geographic
+    - Baseline MEIs: governance (Corporate & Stakeholder Governance)
+    - Systemic/Idiosyncratic Issues: events
+    
+    Returns the agent for the domain's building block.
+    """
+    # Material ESG Issues building block
+    if domain in ("product_production", "financials", "geographic"):
+        return _get_cached_agent("material_esg_analyst")
+    # Baseline MEIs building block
+    elif domain == "governance":
+        return _get_cached_agent("governance_analyst")
+    # Systemic/Idiosyncratic Issues building block
+    elif domain == "events":
+        return _get_cached_agent("systemic_idiosyncratic_analyst")
+    else:
+        # Fallback to management_analyst for unknown domains
+        return _get_cached_agent("management_analyst")
+
+
+def _get_cached_management_agent():
+    """Return a cached management_agent Crew Agent instance or None if unavailable."""
+    return _get_cached_agent("management_analyst")
 
 
 
@@ -320,15 +383,15 @@ def _calibrate_domain_score(
 
 
 def _llm_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore:
-    tmp_agent = _get_cached_management_agent()
+    tmp_agent = _get_agent_for_domain(domain)
     if tmp_agent is None:
         raise RuntimeError(
-            "Crew management_analyst Agent not initialized. Ensure the runner pre-warms the Crew Agent on the main thread before running pattern workers."
+            f"Crew Agent for domain {domain} not initialized. Ensure the runner pre-warms the Crew Agents on the main thread before running pattern workers."
         )
 
     prompt = _build_domain_prompt(domain, chunks)
     agent_response: LiteAgentOutput = tmp_agent.kickoff(prompt)
-    _logger.debug("Invoked management agent via agent.kickoff")
+    _logger.debug("Invoked %s agent via agent.kickoff", domain)
 
     # Extract response from LiteAgentOutput
     # 1. Try pydantic model dump first
@@ -343,18 +406,18 @@ def _llm_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore:
             # Fall back to heuristic scoring instead of crashing
             return _heuristic_domain_score(domain, chunks)
     else:
-        _logger.warning("Empty response from management_analyst Agent for domain %s, falling back to heuristic", domain)
+        _logger.warning("Empty response from %s Agent for domain %s, falling back to heuristic", tmp_agent.config.get("role", "unknown"), domain)
         return _heuristic_domain_score(domain, chunks)
     
     if not isinstance(parsed, dict):
-        _logger.warning("Invalid response type from management_analyst Agent for domain %s, falling back to heuristic", domain)
+        _logger.warning("Invalid response type from %s Agent for domain %s, falling back to heuristic", tmp_agent.config.get("role", "unknown"), domain)
         return _heuristic_domain_score(domain, chunks)
 
     try:
         estimated_score = max(0.0, min(MAX_SCORE, float(parsed.get("estimated_score", 0.0))))
         confidence = max(0.0, min(1.0, float(parsed.get("confidence", BASE_CONFIDENCE))))
     except (TypeError, ValueError):
-        _logger.warning("Invalid numeric fields in management_analyst Agent response for domain %s, falling back to heuristic", domain)
+        _logger.warning("Invalid numeric fields in %s Agent response for domain %s, falling back to heuristic", tmp_agent.config.get("role", "unknown"), domain)
         return _heuristic_domain_score(domain, chunks)
 
     rationale = str(parsed.get("rationale", "")).strip()
@@ -475,13 +538,17 @@ def _extract_critique_response(raw_text: str) -> dict | None:
         return None
 
 
-def _call_critique_llm(prompt: str) -> dict | None:
-    # Crew-only critique path: require a pre-warmed management_analyst Agent and
+def _call_critique_llm(prompt: str, domain: str | None = None) -> dict | None:
+    # Crew-only critique path: require a pre-warmed Agent and
     # use it to generate critique JSON. No direct LLM fallback is allowed.
-    tmp_agent = _get_cached_management_agent()
+    # If domain is provided, use the domain-specific agent; otherwise use management_analyst
+    if domain:
+        tmp_agent = _get_agent_for_domain(domain)
+    else:
+        tmp_agent = _get_cached_management_agent()
     if tmp_agent is None:
         raise RuntimeError(
-            "Crew management_analyst Agent not initialized for critique. Ensure the runner pre-warms the Crew Agent on the main thread."
+            f"Crew Agent not initialized for critique. Ensure the runner pre-warms the Crew Agents on the main thread."
         )
 
     agent_response = None
@@ -504,7 +571,7 @@ def _call_critique_llm(prompt: str) -> dict | None:
             agent_response = None
 
     if agent_response is None:
-        raise RuntimeError("Management Crew Agent does not expose a supported invocation method for critique (tried agent.llm.call and agent.kickoff)")
+        raise RuntimeError(f"Crew Agent does not expose a supported invocation method for critique (tried agent.llm.call and agent.kickoff) for agent {tmp_agent.config.get('role', 'unknown')}")
 
     # Handle LiteAgentOutput from kickoff or raw string from llm.call
     if hasattr(agent_response, 'pydantic'):
@@ -518,7 +585,7 @@ def _call_critique_llm(prompt: str) -> dict | None:
                 _logger.warning("LLM returned non-JSON text for critique, returning None to skip critique")
                 return None
         else:
-            _logger.warning("Empty critique response from management_analyst Agent, returning None to skip critique")
+            _logger.warning("Empty critique response from %s Agent, returning None to skip critique", tmp_agent.config.get("role", "unknown"))
             return None
     elif isinstance(agent_response, dict):
         parsed = agent_response
@@ -526,7 +593,7 @@ def _call_critique_llm(prompt: str) -> dict | None:
         parsed = _extract_critique_response(str(agent_response))
     
     if not isinstance(parsed, dict):
-        _logger.warning("Invalid response type from management_analyst Agent for critique, returning None to skip critique")
+        _logger.warning("Invalid response type from %s Agent for critique, returning None to skip critique", tmp_agent.config.get("role", "unknown"))
         return None
     return parsed
 
@@ -543,7 +610,7 @@ def critique_and_adjust(domain: str, candidate: DomainScore, critique_chunks: li
         used_chunk_ids=candidate.used_chunk_ids,
     )
 
-    critique_response = _call_critique_llm(prompt)
+    critique_response = _call_critique_llm(prompt, domain=domain)
     if critique_response is None:
         _logger.warning("Critique LLM returned None for domain %s, skipping critique adjustment", domain)
         return candidate, {"adjusted": False, "gap": 0.0, "feedback": "Critique LLM failed to return valid JSON"}
