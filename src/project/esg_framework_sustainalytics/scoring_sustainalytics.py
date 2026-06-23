@@ -406,18 +406,18 @@ def _llm_domain_score(domain: str, chunks: list[Chunk]) -> DomainScore:
             # Fall back to heuristic scoring instead of crashing
             return _heuristic_domain_score(domain, chunks)
     else:
-        _logger.warning("Empty response from %s Agent for domain %s, falling back to heuristic", tmp_agent.config.get("role", "unknown"), domain)
+        _logger.warning("Empty response from %s Agent for domain %s, falling back to heuristic", (tmp_agent.config or {}).get("role", "unknown"), domain)
         return _heuristic_domain_score(domain, chunks)
     
     if not isinstance(parsed, dict):
-        _logger.warning("Invalid response type from %s Agent for domain %s, falling back to heuristic", tmp_agent.config.get("role", "unknown"), domain)
+        _logger.warning("Invalid response type from %s Agent for domain %s, falling back to heuristic", (tmp_agent.config or {}).get("role", "unknown"), domain)
         return _heuristic_domain_score(domain, chunks)
 
     try:
         estimated_score = max(0.0, min(MAX_SCORE, float(parsed.get("estimated_score", 0.0))))
         confidence = max(0.0, min(1.0, float(parsed.get("confidence", BASE_CONFIDENCE))))
     except (TypeError, ValueError):
-        _logger.warning("Invalid numeric fields in %s Agent response for domain %s, falling back to heuristic", tmp_agent.config.get("role", "unknown"), domain)
+        _logger.warning("Invalid numeric fields in %s Agent response for domain %s, falling back to heuristic", (tmp_agent.config or {}).get("role", "unknown"), domain)
         return _heuristic_domain_score(domain, chunks)
 
     rationale = str(parsed.get("rationale", "")).strip()
@@ -571,7 +571,7 @@ def _call_critique_llm(prompt: str, domain: str | None = None) -> dict | None:
             agent_response = None
 
     if agent_response is None:
-        raise RuntimeError(f"Crew Agent does not expose a supported invocation method for critique (tried agent.llm.call and agent.kickoff) for agent {tmp_agent.config.get('role', 'unknown')}")
+        raise RuntimeError(f"Crew Agent does not expose a supported invocation method for critique (tried agent.llm.call and agent.kickoff) for agent {(tmp_agent.config or {}).get('role', 'unknown')}")
 
     # Handle LiteAgentOutput from kickoff or raw string from llm.call
     if hasattr(agent_response, 'pydantic'):
@@ -585,7 +585,7 @@ def _call_critique_llm(prompt: str, domain: str | None = None) -> dict | None:
                 _logger.warning("LLM returned non-JSON text for critique, returning None to skip critique")
                 return None
         else:
-            _logger.warning("Empty critique response from %s Agent, returning None to skip critique", tmp_agent.config.get("role", "unknown"))
+            _logger.warning("Empty critique response from %s Agent, returning None to skip critique", (tmp_agent.config or {}).get("role", "unknown"))
             return None
     elif isinstance(agent_response, dict):
         parsed = agent_response
@@ -593,7 +593,7 @@ def _call_critique_llm(prompt: str, domain: str | None = None) -> dict | None:
         parsed = _extract_critique_response(str(agent_response))
     
     if not isinstance(parsed, dict):
-        _logger.warning("Invalid response type from %s Agent for critique, returning None to skip critique", tmp_agent.config.get("role", "unknown"))
+        _logger.warning("Invalid response type from %s Agent for critique, returning None to skip critique", (tmp_agent.config or {}).get("role", "unknown"))
         return None
     return parsed
 
