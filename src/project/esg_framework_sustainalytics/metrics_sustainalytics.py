@@ -214,7 +214,6 @@ def latency_efficiency(
         "latency_critical_path": round(critical_path, 6),
         "latency_sum_durations": round(total_latency, 6),  # Keep sum for reference
         "coverage_per_call": round(coverage / max(1, total_agent_calls), 6),
-        "token_efficiency": round(coverage / max(1, total_tokens), 8),
     }
 
 

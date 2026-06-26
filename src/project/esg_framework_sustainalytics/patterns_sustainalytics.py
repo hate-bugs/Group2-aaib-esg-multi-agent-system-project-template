@@ -6,10 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from project.esg_framework_sustainalytics.chunking_sustainalytics import split_report_to_chunks
 from project.esg_framework_sustainalytics.heuristics_sustainalytics import ALL_DOMAINS
-from project.esg_framework_sustainalytics.metrics_sustainalytics import (
-    Timer,
-    deliberation_quality,
-)
+from project.esg_framework_sustainalytics.metrics_sustainalytics import Timer
 from project.esg_framework_sustainalytics.models_sustainalytics import DomainScore, ReportRecord, ReportRunResult, RetrievalEvent
 from project.esg_framework_sustainalytics.retrieval_sustainalytics import ChunkStore, retrieve_for_domain
 from project.esg_framework_sustainalytics.scoring_sustainalytics import (
@@ -74,7 +71,6 @@ def _metric_bundle(
     chunks,
     timer: Timer,
     total_agent_calls: int,
-    deliberation_stats: dict[str, float],
 ) -> dict[str, float]:
     from project.esg_framework_sustainalytics.metrics_sustainalytics import (
         accuracy_from_mae,
@@ -118,7 +114,6 @@ def _metric_bundle(
         "hallucination_unsupported": hallucination["unsupported_claim_rate"],
         "hallucination_partial": hallucination["partial_support_rate"],
         **latency,
-        **deliberation_stats,
     }
 
 
@@ -173,7 +168,6 @@ def run_parallel_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Repor
         chunks,
         timer,
         total_agent_calls=PARALLEL_TOTAL_AGENT_CALLS,
-        deliberation_stats=deliberation_quality(0, 1, 0, 1.0),
     )
 
     return ReportRunResult(
@@ -301,7 +295,6 @@ def run_handoff_pattern(report: ReportRecord, chunk_store: ChunkStore) -> Report
         chunks,
         timer,
         total_agent_calls=HANDOFF_TOTAL_AGENT_CALLS,
-        deliberation_stats=deliberation_quality(0, 1, 0, 1.0),
     )
 
     return ReportRunResult(
@@ -393,7 +386,6 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
         timer.stop(f"score_{domain}")
 
     dominance_ratio = (max(dominance_counter.values()) / len(dominance_counter)) if dominance_counter else 0.0
-    deliberation = deliberation_quality(conflicts, len(ALL_DOMAINS), resolved, dominance_ratio)
 
     total_score = aggregate_total_score(domain_scores)
     comparison = _compare_to_ground_truth(total_score, report)
@@ -405,7 +397,6 @@ def run_review_critique_pattern(report: ReportRecord, chunk_store: ChunkStore, m
         chunks,
         timer,
         total_agent_calls=REVIEW_TOTAL_AGENT_CALLS,
-        deliberation_stats=deliberation,
     )
 
     return ReportRunResult(
